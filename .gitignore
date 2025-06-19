@@ -1,16 +1,26 @@
 # Environment and configuration files
 .env
-.env.local
-.env.development
-.env.staging
-.env.production
+.env.*
 env.txt
 samconfig.toml
+**/env.example.*
+local.env
 
-# AWS SAM build artifacts
+# AWS SAM build artifacts and deployment
 .aws-sam/
 build/
 dist/
+*.zip
+deployment-package.zip
+function.zip
+packaged-template.yaml
+packaged-template.yml
+
+# CloudFormation outputs and stack files
+outputs.json
+stack-outputs.json
+stack-info.json
+cfn-response.json
 
 # Node.js dependencies and artifacts
 node_modules/
@@ -20,6 +30,8 @@ yarn-error.log*
 package-lock.json
 .npm
 .yarn-integrity
+.pnp
+.pnp.js
 
 # Python artifacts
 __pycache__/
@@ -30,8 +42,20 @@ __pycache__/
 env/
 venv/
 .venv/
+ENV/
+env.bak/
+venv.bak/
 pip-log.txt
 pip-delete-this-directory.txt
+.python-version
+*.egg-info/
+*.egg
+
+# AWS credentials and config (never commit these!)
+credentials
+config
+.aws/
+aws-exports.js
 
 # IDE and editor files
 .vscode/
@@ -39,49 +63,8 @@ pip-delete-this-directory.txt
 *.swp
 *.swo
 *~
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-logs/
-
-# Runtime data
-pids
-*.pid
-*.seed
-*.pid.lock
-
-# Coverage directory used by tools like istanbul
-coverage/
-.coverage
-.pytest_cache/
-
-# Temporary files
-tmp/
-temp/
-*.tmp
-*.temp
-
-# AWS credentials (never commit these!)
-credentials
-config
-.aws/
-
-# Backup files
-*.bak
-*.backup
-*.orig
-
-# Test artifacts
-.pytest_cache/
-test-results/
-coverage/
-
-# Build outputs
-build/
-dist/
-*.zip
+*.sublime-project
+*.sublime-workspace
 
 # OS generated files
 .DS_Store
@@ -91,19 +74,90 @@ dist/
 .Trashes
 ehthumbs.db
 Thumbs.db
+desktop.ini
 
-# SAM specific
-.aws-sam/
-samconfig.toml
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
 
-# Lambda deployment packages
-deployment-package.zip
-function.zip
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
 
-# CloudFormation outputs
-outputs.json
-stack-outputs.json
+# Coverage and testing
+coverage/
+.coverage
+.pytest_cache/
+.nyc_output
+test-results/
+*.lcov
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+*.cache
+
+# Backup files
+*.bak
+*.backup
+*.orig
+*~
+
+# Lambda layer dependencies
+**/layer/python/
+**/layer/nodejs/
+
+# SAM CLI specific
+.sam/
 
 # Local environment files for testing
 test-env.json
-local-config.json 
+local-config.json
+mock-*.json
+test-*.json
+
+# Secrets and sensitive data
+secrets.json
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# CDK specific (if used in future)
+cdk.out/
+cdk.context.json
+
+# Terraform (if used in future)
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# Connect Contact Flow exports (if generated)
+*-contact-flow-export.json
+
+# Campaign data files (keep examples, ignore actual data)
+campaign-*.csv
+leads-*.csv
+results-*.csv
+!sample-*.csv
+!**/sample-files/
+
+# Documentation builds
+docs/_build/
+site/
+
+# Editor swap files
+.*.swp
+.*.swo
+
+# Local test data
+test-data/*.json
+!test-data/mock-*.json
+!test-data/sample-*.json 
