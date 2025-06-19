@@ -1,0 +1,227 @@
+{
+  "Version": "2019-10-30",
+  "StartAction": "12345678-1234-1234-1234-123456789012",
+  "Metadata": {
+    "entryPointPosition": {
+      "x": 40,
+      "y": 40
+    },
+    "ActionMetadata": {
+      "288442fc-00c5-469a-bdd0-ff9f955d8963": {
+        "position": {
+          "x": 137.6,
+          "y": 107.2
+        }
+      },
+      "supabase-lookup-12345": {
+        "position": {
+          "x": 320,
+          "y": 180
+        },
+        "parameters": {
+          "LambdaFunctionARN": {
+            "displayName": "LookupSupabaseFunction"
+          }
+        },
+        "dynamicMetadata": {}
+      },
+      "set-customer-attributes": {
+        "position": {
+          "x": 520,
+          "y": 180
+        }
+      },
+      "check-lead-found": {
+        "position": {
+          "x": 720,
+          "y": 180
+        }
+      },
+      "play-found-greeting": {
+        "position": {
+          "x": 920,
+          "y": 120
+        }
+      },
+      "play-unknown-greeting": {
+        "position": {
+          "x": 920,
+          "y": 240
+        }
+      },
+      "transfer-to-agent": {
+        "position": {
+          "x": 1120,
+          "y": 180
+        }
+      },
+      "set-disposition-attributes": {
+        "position": {
+          "x": 1320,
+          "y": 180
+        }
+      },
+      "invoke-set-disposition": {
+        "position": {
+          "x": 1520,
+          "y": 180
+        },
+        "parameters": {
+          "LambdaFunctionARN": {
+            "displayName": "SetDispositionFunction"
+          }
+        },
+        "dynamicMetadata": {}
+      },
+      "disconnect-customer": {
+        "position": {
+          "x": 1720,
+          "y": 180
+        }
+      }
+    },
+    "name": "UnifiedDialerContactFlow",
+    "description": "Unified contact flow for both power dialer and outbound campaigns with Supabase integration",
+    "type": "contactFlow",
+    "status": "published",
+    "hash": {}
+  },
+  "Actions": [
+    {
+      "Identifier": "12345678-1234-1234-1234-123456789012",
+      "Type": "InvokeExternalResource",
+      "Parameters": {
+        "FunctionArn": "arn:aws:lambda:region:account:function:StackName-LookupSupabaseFunction-xyz",
+        "InvocationTimeLimitSeconds": "8",
+        "ResponseValidation": {
+          "ResponseType": "JSON"
+        }
+      },
+      "Transitions": {
+        "NextAction": "language-routing-decision",
+        "Errors": [
+          {
+            "NextAction": "default-english-queue",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "language-routing-decision",
+      "Type": "Compare",
+      "Parameters": {
+        "ComparisonValue": "$.External.preferredLanguage"
+      },
+      "Transitions": {
+        "NextAction": "spanish-queue-transfer",
+        "Conditions": [
+          {
+            "NextAction": "spanish-queue-transfer",
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": ["spanish"]
+            }
+          },
+          {
+            "NextAction": "spanish-queue-transfer", 
+            "Condition": {
+              "Operator": "Equals",
+              "Operands": ["español"]
+            }
+          }
+        ],
+        "DefaultNextAction": "english-queue-transfer"
+      }
+    },
+    {
+      "Identifier": "spanish-queue-transfer",
+      "Type": "UpdateContactAttributes",
+      "Parameters": {
+        "Attributes": {
+          "leadName": "$.External.leadName",
+          "leadStatus": "$.External.leadStatus", 
+          "totalLoanAmount": "$.External.totalLoanAmount",
+          "creditScore": "$.External.creditScore",
+          "lastContactDate": "$.External.lastContactDate",
+          "leadNotes": "$.External.leadNotes",
+          "campaignId": "$.External.campaignId",
+          "preferredLanguage": "spanish",
+          "agentLanguage": "spanish",
+          "routingProfile": "Spanish-Speaking-Profile"
+        }
+      },
+      "Transitions": {
+        "NextAction": "transfer-to-spanish-queue"
+      }
+    },
+    {
+      "Identifier": "english-queue-transfer", 
+      "Type": "UpdateContactAttributes",
+      "Parameters": {
+        "Attributes": {
+          "leadName": "$.External.leadName",
+          "leadStatus": "$.External.leadStatus",
+          "totalLoanAmount": "$.External.totalLoanAmount", 
+          "creditScore": "$.External.creditScore",
+          "lastContactDate": "$.External.lastContactDate",
+          "leadNotes": "$.External.leadNotes",
+          "campaignId": "$.External.campaignId",
+          "preferredLanguage": "english",
+          "agentLanguage": "english",
+          "routingProfile": "English-Speaking-Profile"
+        }
+      },
+      "Transitions": {
+        "NextAction": "transfer-to-english-queue"
+      }
+    },
+    {
+      "Identifier": "transfer-to-spanish-queue",
+      "Type": "TransferContactToQueue",
+      "Parameters": {
+        "QueueId": "arn:aws:connect:region:account:instance/instance-id/queue/spanish-queue-id"
+      },
+      "Transitions": {
+        "NextAction": "end-flow",
+        "Errors": [
+          {
+            "NextAction": "default-english-queue",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "transfer-to-english-queue",
+      "Type": "TransferContactToQueue", 
+      "Parameters": {
+        "QueueId": "arn:aws:connect:region:account:instance/instance-id/queue/english-queue-id"
+      },
+      "Transitions": {
+        "NextAction": "end-flow",
+        "Errors": [
+          {
+            "NextAction": "default-english-queue",
+            "ErrorType": "NoMatchingError"
+          }
+        ]
+      }
+    },
+    {
+      "Identifier": "default-english-queue",
+      "Type": "TransferContactToQueue",
+      "Parameters": {
+        "QueueId": "arn:aws:connect:region:account:instance/instance-id/queue/english-queue-id"
+      },
+      "Transitions": {
+        "NextAction": "end-flow"
+      }
+    },
+    {
+      "Identifier": "end-flow",
+      "Type": "DisconnectParticipant",
+      "Parameters": {}
+    }
+  ]
+} 

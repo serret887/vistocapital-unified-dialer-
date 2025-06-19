@@ -1,0 +1,21 @@
+{
+  "name": "supabase-lookup-lambda",
+  "version": "1.0.0",
+  "description": "Lambda function to lookup customer data from Supabase for Amazon Connect",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.38.0",
+    "aws-sdk": "^2.1490.0"
+  },
+  "keywords": [
+    "aws",
+    "lambda",
+    "amazon-connect",
+    "supabase"
+  ],
+  "author": "Unified Dialer",
+  "license": "MIT"
+} 

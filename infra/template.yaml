@@ -1,0 +1,549 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Unified Omnichannel Dialer for Amazon Connect
+
+Globals:
+  Function:
+    Timeout: 60
+    MemorySize: 128
+    Runtime: python3.9
+
+Parameters:
+  ConnectInstanceId:
+    Type: String
+    AllowedPattern: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    Description: Amazon Connect Instance ID to use for outbound calls
+  ConnectContactFlowId:
+    Type: String
+    AllowedPattern: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    Description: Amazon Connect Contact Flow ID to use for outbound calls
+  ConnectQueueId:
+    Type: String
+    AllowedPattern: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    Description: Amazon Connect Queue ID to use for outbound calls
+  ValidateProfile:
+    Type: String
+    Default: 'True'
+    AllowedValues: ["True", "False"]
+    Description: Determines whether the function will validate the profile exists or not
+  CustomerProfilesDomainName:
+    Type: String
+    Description: Amazon Connect Customer Profiles Domain Name
+  CountryCode:
+    Type: Number
+    Default: 1
+    Description: Country code of destination country
+  ISOCountryCode:
+    Type: String
+    Default: US
+    MaxLength: 2
+    Description: 2 letter code for country code
+  ConcurrentCalls:
+    Type: Number
+    Default: 5
+    Description: Number of calls to be called simultaneously
+  CallTimeOut:
+    Type: Number
+    Default: 3600
+    Description: Timeout in seconds for each call
+  NoCallStatusList:
+    Type: CommaDelimitedList
+    Default: No Interest,Do Not Call,Previous Renewal
+    Description: Status list for which no call will be made
+  SupabaseUrl:
+    Type: String
+    Description: Supabase project URL (e.g., https://your-project.supabase.co)
+  SupabaseAnonKey:
+    Type: String
+    NoEcho: true
+    Description: Supabase anonymous key for API access
+  Environment:
+    Type: String
+    Default: 'prod'
+    AllowedValues: ['dev', 'staging', 'prod']
+    Description: 'Environment designation for resource tagging'
+
+Resources:
+  # === S3 Buckets ===
+  DialingListBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Join ['-', [!Ref AWS::StackName,'input-bucket', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]]]
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: True
+    DeletionPolicy: Delete
+
+  ResultsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Join ['-', [!Ref AWS::StackName,'output-bucket', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]]]
+    DeletionPolicy: Delete
+
+  # === DynamoDB Tables ===
+  ActiveDialingTable:
+    Type: AWS::DynamoDB::Table
+    Properties: 
+      AttributeDefinitions: 
+        - AttributeName: "contactId"
+          AttributeType: "S"
+      KeySchema: 
+        - AttributeName: "contactId"
+          KeyType: "HASH"
+      BillingMode: "PAY_PER_REQUEST"
+      PointInTimeRecoverySpecification: 
+        PointInTimeRecoveryEnabled: True
+      SSESpecification:
+        SSEEnabled: True
+      TimeToLiveSpecification:
+          AttributeName: "TimeToLive"
+          Enabled: True
+
+  LeadCacheTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: "customerNumber"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "customerNumber"
+          KeyType: "HASH"
+      BillingMode: "PAY_PER_REQUEST"
+      TimeToLiveSpecification:
+        AttributeName: "ttl"
+        Enabled: True
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: True
+      SSESpecification:
+        SSEEnabled: True
+
+  # === SQS Queues ===
+  DialingListQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Join ['-', [!Ref AWS::StackName,'dialing-queue', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]]]
+      VisibilityTimeout: 30
+      DelaySeconds: 0
+      MessageRetentionPeriod: 1209600
+
+  PriorityDialingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Join ['-', [!Ref AWS::StackName,'priority-queue', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]]]
+      VisibilityTimeout: 30
+      DelaySeconds: 0
+      MessageRetentionPeriod: 1209600
+
+  # === Secrets ===
+  SupabaseSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '${AWS::StackName}-supabase-credentials'
+      Description: 'Supabase credentials for unified dialer'
+      SecretString: !Sub |
+        {
+          "url": "${SupabaseUrl}",
+          "anon_key": "${SupabaseAnonKey}"
+        }
+
+  # === IAM Roles ===
+  KinesisFirehoseDeliveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - firehose.amazonaws.com
+                - s3.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: deliveryToS3
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: deliveryToS3
+                Effect: Allow
+                Action:
+                  - s3:AbortMultipartUpload
+                  - s3:GetBucketLocation
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:ListBucketMultipartUploads
+                  - s3:PutObject
+                Resource: "*"
+
+  UnifiedDialerLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaKinesisExecutionRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:PutObject'
+                  - 's3:GetObject'
+                  - 's3:DeleteObject'
+                  - 's3:ListBucket'
+                Resource:
+                  - !GetAtt DialingListBucket.Arn
+                  - !Sub '${DialingListBucket.Arn}/*'
+                  - !GetAtt ResultsBucket.Arn
+                  - !Sub '${ResultsBucket.Arn}/*'
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:PutItem'
+                  - 'dynamodb:DeleteItem'
+                  - 'dynamodb:GetItem'
+                  - 'dynamodb:Scan'
+                  - 'dynamodb:Query'
+                  - 'dynamodb:UpdateItem'
+                Resource:
+                  - !GetAtt ActiveDialingTable.Arn
+                  - !GetAtt LeadCacheTable.Arn
+        - PolicyName: StepFunctionTaskToken
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'states:SendTaskSuccess'
+                  - 'states:SendTaskFailure'
+                  - 'states:SendTaskHeartbeat'
+                Resource: '*'
+        - PolicyName: ConnectPermissions
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'connect:StartOutboundVoiceContact'
+                  - 'connect:DescribeHoursOfOperation'
+                  - 'connect:GetCurrentMetricData'
+                  - 'connect:DescribeQueue'
+                  - 'connect:CreateProfile'
+                  - 'profile:DeleteProfile'
+                  - 'profile:UpdateProfile'
+                  - 'profile:SearchProfiles'
+                  - 'connect:GetContactAttributes'
+                  - 'connect:UpdateContactAttributes'
+                Resource: '*'
+        - PolicyName: ParameterAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ssm:GetParametersByPath'
+                  - 'ssm:GetParameter'
+                  - 'ssm:PutParameter'
+                Resource: '*'
+        - PolicyName: DataStreamAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'firehose:*'
+                  - 'kinesis:*'
+                  - 'sqs:*'
+                Resource: '*'
+        - PolicyName: PinpointAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'mobiletargeting:GetVoiceTemplate'
+                  - 'mobiletargeting:GetCampaign'
+                  - 'mobiletargeting:GetSegment'
+                  - 'mobiletargeting:PhoneNumberValidate'
+                  - 'mobiletargeting:UpdateCampaign'
+                  - 'mobiletargeting:PutEvents'
+                Resource: '*'
+
+  SupabaseLookupLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBCacheAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:PutItem'
+                  - 'dynamodb:GetItem'
+                  - 'dynamodb:UpdateItem'
+                Resource: !GetAtt LeadCacheTable.Arn
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'secretsmanager:GetSecretValue'
+                Resource: !Ref SupabaseSecret
+
+  # === Lambda Functions ===
+  LookupSupabaseFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt SupabaseLookupLambdaRole.Arn
+      CodeUri: ../lambdas/lookupSupabase/
+      Handler: index.handler
+      Runtime: nodejs18.x
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          SUPABASE_SECRET_ARN: !Ref SupabaseSecret
+          LEAD_CACHE_TABLE: !Ref LeadCacheTable
+
+  # === SSM Parameters ===
+  ContactSourceParameter:
+    Type: AWS::SSM::Parameter
+    Properties: 
+      Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'contact-source']]
+      Type: String
+      Value: 's3'
+  
+  DialIndexParameter:
+    Type: AWS::SSM::Parameter
+    Properties: 
+      Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'dialIndex']]
+      Type: String
+      Value: '0'
+  
+  DialerStatusParameter:
+    Type: AWS::SSM::Parameter
+    Properties: 
+      Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'activeDialer']]
+      Type: String
+      Value: 'False'  
+
+  TotalRecordsParameter:
+    Type: AWS::SSM::Parameter
+    Properties: 
+      Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'totalRecords']]
+      Type: String
+      Value: '0'
+  
+  ActiveDialingTableParameter:
+    Type: AWS::SSM::Parameter
+    Properties: 
+      Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'table-activedialing']]
+      Type: String
+      Value: !Ref ActiveDialingTable
+
+  ContactFlowParameter:
+    Type: AWS::SSM::Parameter
+    Properties: 
+      Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'contactflow']]
+      Type: String
+      Value: !Ref ConnectContactFlowId
+
+  OutputBucketParameter:
+    Type: AWS::SSM::Parameter
+    Properties: 
+      Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'ResultsBucket']]
+      Type: String
+      Value: !Ref ResultsBucket
+      
+  ConnectIdParameter:
+    Type: AWS::SSM::Parameter
+    Properties: 
+      Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'connectid']]
+      Type: String
+      Value: !Ref ConnectInstanceId
+
+  QueueParameter:
+    Type: AWS::SSM::Parameter
+    Properties: 
+      Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'queue']]
+      Type: String
+      Value: !Ref ConnectQueueId
+
+  CountryCodeParameter:
+    Type: AWS::SSM::Parameter
+    Properties: 
+      Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'countrycode']]
+      Type: String
+      Value: !Ref CountryCode
+
+  ISOCountryCodeParameter:
+    Type: AWS::SSM::Parameter
+    Properties: 
+      Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'isocountrycode']]
+      Type: String
+      Value: !Ref ISOCountryCode
+
+  ConcurrentCallsParameter:
+    Type: AWS::SSM::Parameter
+    Properties: 
+      Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'concurrentCalls']]
+      Type: String
+      Value: !Ref ConcurrentCalls
+
+  TimeOutParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'timeOut']]
+      Type: String
+      Value: !Ref CallTimeOut
+
+  ConcurrencyChangeParameter:
+    Type: AWS::SSM::Parameter
+    Properties: 
+      Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'concurrencyChange']]
+      Type: String
+      Value: 'False'
+
+  CampaignModeParameter:
+    Type: AWS::SSM::Parameter
+    Properties: 
+      Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'campaignMode']]
+      Type: String
+      Value: 'power-dialer'
+      Description: 'Campaign mode: power-dialer or blaster'
+
+  SupabaseConfigParameter:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'supabase-secret']]
+      Type: String
+      Value: !Ref SupabaseSecret
+      Description: 'ARN of Supabase credentials secret'
+
+  # === Optional: Pinpoint Application Resources ===
+  # Uncomment these if you want to create Pinpoint applications as part of this stack
+  
+  # PinpointApplication:
+  #   Type: AWS::Pinpoint::App
+  #   Properties:
+  #     Name: !Sub '${AWS::StackName}-voice-campaigns'
+  #     Tags:
+  #       Environment: !Ref Environment
+  #       Company: vistocapital
+  #       Purpose: voice-campaigns
+
+  # PinpointApplicationParameter:
+  #   Type: AWS::SSM::Parameter
+  #   Properties:
+  #     Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'pinpoint-application-id']]
+  #     Type: String
+  #     Value: !Ref PinpointApplication
+  #     Description: 'Pinpoint Application ID for voice campaigns'
+
+  # === Lambda Permissions ===
+  ConnectLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref LookupSupabaseFunction
+      Principal: connect.amazonaws.com
+      SourceArn: !Sub 'arn:aws:connect:${AWS::Region}:${AWS::AccountId}:instance/${ConnectInstanceId}/*'
+
+  # TODO: Add this when queueContacts Lambda is implemented
+  # PinpointLambdaPermission:
+  #   Type: AWS::Lambda::Permission
+  #   Properties:
+  #     Action: 'lambda:InvokeFunction'
+  #     FunctionName: !Ref QueueContactsFunction
+  #     Principal: !Sub pinpoint.${AWS::Region}.amazonaws.com
+  #     SourceArn: !Sub 'arn:aws:mobiletargeting:${AWS::Region}:${AWS::AccountId}:apps/*'
+
+  # === Kinesis Firehose ===
+  ResultsFirehose:
+    Type: 'AWS::KinesisFirehose::DeliveryStream'
+    Properties:
+      DeliveryStreamType: DirectPut
+      DeliveryStreamName: !Join ['-', [!Ref AWS::StackName,'results', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]]]
+      S3DestinationConfiguration:
+        BucketARN: !GetAtt ResultsBucket.Arn
+        BufferingHints:
+          IntervalInSeconds: '60'
+          SizeInMBs: '10'
+        CompressionFormat: UNCOMPRESSED
+        RoleARN: !GetAtt KinesisFirehoseDeliveryRole.Arn
+
+Outputs:
+  InputBucket:
+    Description: "S3 Bucket for uploading contact lists (CSV format)"
+    Value: !Ref DialingListBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-InputBucket"
+
+  OutputBucket:
+    Description: "S3 Bucket for campaign results and logs"
+    Value: !Ref ResultsBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-OutputBucket"
+
+  LookupSupabaseFunction:
+    Description: "Supabase Lookup Lambda Function ARN for Connect integration"
+    Value: !GetAtt LookupSupabaseFunction.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-SupabaseLookup"
+
+  LeadCacheTable:
+    Description: "DynamoDB table for caching lead data"
+    Value: !Ref LeadCacheTable
+    Export:
+      Name: !Sub "${AWS::StackName}-LeadCache"
+
+  ActiveDialingTable:
+    Description: "DynamoDB table for tracking active calls"
+    Value: !Ref ActiveDialingTable
+    Export:
+      Name: !Sub "${AWS::StackName}-ActiveDialing"
+
+  SupabaseSecret:
+    Description: "Secrets Manager secret containing Supabase credentials"
+    Value: !Ref SupabaseSecret
+    Export:
+      Name: !Sub "${AWS::StackName}-SupabaseSecret"
+
+  ConnectInstanceId:
+    Description: "Amazon Connect Instance ID"
+    Value: !Ref ConnectInstanceId
+
+  ContactFlowId:
+    Description: "Amazon Connect Contact Flow ID"
+    Value: !Ref ConnectContactFlowId
+
+  QueueId:
+    Description: "Amazon Connect Queue ID"
+    Value: !Ref ConnectQueueId
+
+  DeploymentGuide:
+    Description: "Next steps for configuration"
+    Value: "1. Import contact-flows/UnifiedDialerContactFlow.json to Connect 2. Add Lambda functions to Connect 3. Update Supabase credentials 4. Test with sample-contact-list.csv" 

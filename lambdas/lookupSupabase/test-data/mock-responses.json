@@ -1,0 +1,59 @@
+{
+  "+15551234567": {
+    "id": 1,
+    "phone": "+15551234567",
+    "firstName": "John",
+    "lastName": "Doe",
+    "email": "john.doe@vistocapital.com",
+    "company": "VistoCorp",
+    "leadScore": 85,
+    "source": "website",
+    "lastContactDate": "2024-01-10T15:30:00Z",
+    "preferences": {
+      "contactMethod": "phone",
+      "bestTime": "morning",
+      "timezone": "America/New_York"
+    },
+    "tags": ["high-priority", "qualified"],
+    "created_at": "2024-01-01T00:00:00Z",
+    "updated_at": "2024-01-10T15:30:00Z"
+  },
+  "+15559876543": {
+    "id": 2,
+    "phone": "+15559876543",
+    "firstName": "Jane",
+    "lastName": "Smith",
+    "email": "jane.smith@example.com",
+    "company": "SmithCorp",
+    "leadScore": 72,
+    "source": "referral",
+    "lastContactDate": "2024-01-08T10:15:00Z",
+    "preferences": {
+      "contactMethod": "email",
+      "bestTime": "afternoon",
+      "timezone": "America/Los_Angeles"
+    },
+    "tags": ["warm-lead"],
+    "created_at": "2024-01-02T00:00:00Z",
+    "updated_at": "2024-01-08T10:15:00Z"
+  },
+  "+15555555555": {
+    "id": 3,
+    "phone": "+15555555555",
+    "firstName": "Bob",
+    "lastName": "Wilson",
+    "email": "bob.wilson@test.com",
+    "company": "TestCorp",
+    "leadScore": 45,
+    "source": "cold-call",
+    "lastContactDate": null,
+    "preferences": {
+      "contactMethod": "phone",
+      "bestTime": "evening",
+      "timezone": "America/Chicago"
+    },
+    "tags": ["cold-lead"],
+    "created_at": "2024-01-05T00:00:00Z",
+    "updated_at": "2024-01-05T00:00:00Z"
+  }
+}

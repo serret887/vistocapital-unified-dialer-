@@ -1,0 +1,1 @@
+{"customerNumber": "+15551234567", "Records": [{"eventSource": "aws:s3", "s3": {"bucket": {"name": "vistocapital-test-bucket"}, "object": {"key": "test-contact-list.csv"}}}]}

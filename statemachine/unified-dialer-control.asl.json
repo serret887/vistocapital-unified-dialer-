@@ -1,0 +1,379 @@
+{
+  "Comment": "Unified Dialer Controller - Supporting both Power Dialer and Blaster modes",
+  "StartAt": "ActivateDialer",
+  "States": {
+    "ActivateDialer": {
+      "Comment": "Activate unified dialer",
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:ssm:putParameter",
+      "Parameters": {
+        "Name": "${ParameterDialerStatus}",
+        "Overwrite": true,
+        "Value": "True"
+      },
+      "Next": "GetConfig",
+      "ResultPath": null
+    },
+    "GetConfig": {
+      "Comment": "Get configuration parameters including campaign mode",
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "DeactivateDialerDueError"
+        }
+      ],
+      "Parameters": {
+        "FunctionName": "${GetConfigFunctionArn}",
+        "Payload": {
+          "Input.$": "$"
+        }
+      },
+      "Next": "DetermineCampaignMode",
+      "ResultPath": "$.params",
+      "ResultSelector": {
+        "totalRecords.$": "$.Payload.totalRecords",
+        "table-activedialing.$": "$.Payload.table-activedialing",
+        "contactflow.$": "$.Payload.contactflow",
+        "connectid.$": "$.Payload.connectid",
+        "queue.$": "$.Payload.queue",
+        "concurrentCalls.$": "$.Payload.concurrentCalls",
+        "dialerThreads.$": "$.Payload.dialerThreads",
+        "timeOut.$": "$.Payload.timeOut",
+        "campaignMode.$": "$.Payload.campaignMode"
+      }
+    },
+    "DetermineCampaignMode": {
+      "Comment": "Route to appropriate dialer mode based on configuration",
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.params.campaignMode",
+          "StringEquals": "power-dialer",
+          "Next": "PowerDialerMode"
+        },
+        {
+          "Variable": "$.params.campaignMode",
+          "StringEquals": "blaster",
+          "Next": "BlasterMode"
+        }
+      ],
+      "Default": "PowerDialerMode"
+    },
+    "PowerDialerMode": {
+      "Comment": "Power Dialer mode with agent availability monitoring",
+      "Type": "Parallel",
+      "Next": "GetConcurrencyChange",
+      "Branches": [
+        {
+          "StartAt": "PowerDialer",
+          "States": {
+            "PowerDialer": {
+              "Type": "Map",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "Next": "DeactivateDialer-MapError"
+                }
+              ],
+              "ResultPath": null,
+              "ItemsPath": "$.params.dialerThreads",
+              "InputPath": "$",
+              "Parameters": {
+                "params.$": "$.params"
+              },
+              "Iterator": {
+                "StartAt": "GetDialerStatus",
+                "States": {
+                  "GetDialerStatus": {
+                    "Type": "Task",
+                    "Parameters": {
+                      "Name": "${ParameterDialerStatus}"
+                    },
+                    "Resource": "arn:aws:states:::aws-sdk:ssm:getParameter",
+                    "Next": "IsDialerActive",
+                    "ResultSelector": {
+                      "value.$": "$.Parameter.Value"
+                    },
+                    "ResultPath": "$.params.activeDialer"
+                  },
+                  "GetContacts": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::lambda:invoke",
+                    "Parameters": {
+                      "Payload": {
+                        "params.$": "$.params",
+                        "availAgents": 1
+                      },
+                      "FunctionName": "${GetContactsFunctionArn}"
+                    },
+                    "ResultSelector": {
+                      "entries.$": "$.Payload.contacts",
+                      "EndOfList.$": "$.Payload.EndOfList"
+                    },
+                    "ResultPath": "$.contacts",
+                    "Next": "IsListEmpty"
+                  },
+                  "IsListEmpty": {
+                    "Type": "Choice",
+                    "Choices": [
+                      {
+                        "Variable": "$.contacts.EndOfList",
+                        "StringEquals": "False",
+                        "Next": "EnrichContactWithSupabase"
+                      }
+                    ],
+                    "Default": "Success"
+                  },
+                  "EnrichContactWithSupabase": {
+                    "Comment": "Lookup customer data from Supabase",
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::lambda:invoke",
+                    "Parameters": {
+                      "FunctionName": "${LookupSupabaseFunctionArn}",
+                      "Payload": {
+                        "customerNumber.$": "$.contacts.entries[0].phone"
+                      }
+                    },
+                    "ResultSelector": {
+                      "supabaseData.$": "$.Payload"
+                    },
+                    "ResultPath": "$.enrichment",
+                    "Next": "MergeContactData",
+                    "Catch": [
+                      {
+                        "ErrorEquals": [
+                          "States.ALL"
+                        ],
+                        "Comment": "Continue without enrichment if Supabase lookup fails",
+                        "Next": "Dial",
+                        "ResultPath": null
+                      }
+                    ]
+                  },
+                  "MergeContactData": {
+                    "Comment": "Merge Supabase data with contact attributes",
+                    "Type": "Pass",
+                    "Parameters": {
+                      "contacts": {
+                        "phone.$": "$.contacts.entries[0].phone",
+                        "custID.$": "$.contacts.entries[0].custID",
+                        "attributes.$": "States.JsonMerge($.contacts.entries[0].attributes, $.enrichment.supabaseData, false)"
+                      },
+                      "params.$": "$.params"
+                    },
+                    "Next": "Dial"
+                  },
+                  "Dial": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+                    "Parameters": {
+                      "FunctionName": "${DialFunctionArn}",
+                      "Payload": {
+                        "params.$": "$.params",
+                        "contacts.$": "$.contacts",
+                        "TaskToken.$": "$$.Task.Token"
+                      }
+                    },
+                    "Next": "GetDialerStatus",
+                    "TimeoutSeconds": 1800,
+                    "ResultPath": null
+                  },
+                  "IsDialerActive": {
+                    "Type": "Choice",
+                    "Choices": [
+                      {
+                        "And": [
+                          {
+                            "Variable": "$.params.activeDialer.value",
+                            "StringEquals": "True"
+                          }
+                        ],
+                        "Next": "GetContacts"
+                      }
+                    ],
+                    "Default": "Success"
+                  },
+                  "Success": {
+                    "Type": "Succeed"
+                  }
+                }
+              },
+              "Label": "PowerDialer",
+              "MaxConcurrency": 1000,
+              "ToleratedFailurePercentage": 50,
+              "Next": "DeactivateDialer"
+            },
+            "DeactivateDialer": {
+              "Comment": "Deactivate power dialer",
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:ssm:putParameter",
+              "Parameters": {
+                "Name": "${ParameterDialerStatus}",
+                "Overwrite": true,
+                "Value": "False"
+              },
+              "End": true
+            },
+            "DeactivateDialer-MapError": {
+              "Comment": "Deactivate dialer due to error",
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:ssm:putParameter",
+              "Parameters": {
+                "Name": "${ParameterDialerStatus}",
+                "Overwrite": true,
+                "Value": "False"
+              },
+              "End": true
+            }
+          }
+        }
+      ],
+      "ResultPath": null
+    },
+    "BlasterMode": {
+      "Comment": "Blaster mode for campaign-style dialing",
+      "Type": "Parallel",
+      "Next": "DialerFinished",
+      "Branches": [
+        {
+          "StartAt": "Blaster",
+          "States": {
+            "Blaster": {
+              "Type": "Map",
+              "ResultPath": null,
+              "ItemsPath": "$.params.dialerThreads",
+              "InputPath": "$",
+              "Parameters": {
+                "params.$": "$.params"
+              },
+              "Iterator": {
+                "StartAt": "GetBlasterContacts",
+                "States": {
+                  "GetBlasterContacts": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::lambda:invoke",
+                    "Parameters": {
+                      "Payload": {
+                        "params.$": "$.params",
+                        "availAgents": 1
+                      },
+                      "FunctionName": "${GetContactsFunctionArn}"
+                    },
+                    "ResultSelector": {
+                      "entries.$": "$.Payload.contacts",
+                      "EndOfList.$": "$.Payload.EndOfList"
+                    },
+                    "ResultPath": "$.contacts",
+                    "Next": "IsBlasterListEmpty"
+                  },
+                  "IsBlasterListEmpty": {
+                    "Type": "Choice",
+                    "Choices": [
+                      {
+                        "Variable": "$.contacts.EndOfList",
+                        "StringEquals": "False",
+                        "Next": "BlasterDial"
+                      }
+                    ],
+                    "Default": "BlasterSuccess"
+                  },
+                  "BlasterDial": {
+                    "Type": "Task",
+                    "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+                    "Parameters": {
+                      "FunctionName": "${DialFunctionArn}",
+                      "Payload": {
+                        "params.$": "$.params",
+                        "contacts.$": "$.contacts.entries[0]",
+                        "TaskToken.$": "$$.Task.Token"
+                      }
+                    },
+                    "Next": "GetBlasterContacts",
+                    "TimeoutSeconds": 1800,
+                    "ResultPath": null
+                  },
+                  "BlasterSuccess": {
+                    "Type": "Succeed"
+                  }
+                }
+              },
+              "Label": "Blaster",
+              "MaxConcurrency": 1000,
+              "ToleratedFailurePercentage": 50,
+              "Next": "DeactivateBlaster"
+            },
+            "DeactivateBlaster": {
+              "Comment": "Deactivate blaster",
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:ssm:putParameter",
+              "Parameters": {
+                "Name": "${ParameterDialerStatus}",
+                "Overwrite": true,
+                "Value": "False"
+              },
+              "End": true
+            }
+          }
+        }
+      ],
+      "ResultPath": null
+    },
+    "GetConcurrencyChange": {
+      "Type": "Task",
+      "Parameters": {
+        "Name": "${ParameterConcurrencyChange}"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:ssm:getParameter",
+      "ResultSelector": {
+        "value.$": "$.Parameter.Value"
+      },
+      "ResultPath": "$.params.concurrencyChange",
+      "Next": "CheckConcurrencyChange"
+    },
+    "CheckConcurrencyChange": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.params.concurrencyChange.value",
+          "StringEquals": "True",
+          "Next": "ClearConcurrencyChange"
+        }
+      ],
+      "Default": "DialerFinished"
+    },
+    "ClearConcurrencyChange": {
+      "Type": "Task",
+      "Parameters": {
+        "Name": "${ParameterConcurrencyChange}",
+        "Overwrite": true,
+        "Value": "False"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:ssm:putParameter",
+      "Comment": "Clear concurrencyChange parameter and restart dialer",
+      "Next": "ActivateDialer"
+    },
+    "DeactivateDialerDueError": {
+      "Comment": "Deactivate dialer due to error",
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:ssm:putParameter",
+      "Parameters": {
+        "Name": "${ParameterDialerStatus}",
+        "Overwrite": true,
+        "Value": "False"
+      },
+      "Next": "DialerError"
+    },
+    "DialerFinished": {
+      "Type": "Succeed"
+    },
+    "DialerError": {
+      "Type": "Fail"
+    }
+  }
+} 

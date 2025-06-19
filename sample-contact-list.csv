@@ -1,0 +1,6 @@
+custID,phone,name,email,status,campaignId,endpointId,leadSource,propertyCount,loanAmount
+001,5551234567,John Smith,john.smith@email.com,qualified,test-campaign-001,endpoint-001,website,2,750000
+002,5551234568,Jane Doe,jane.doe@email.com,new,test-campaign-001,endpoint-002,referral,1,425000
+003,5551234569,Bob Johnson,bob.johnson@email.com,contacted,test-campaign-001,endpoint-003,campaign,3,1200000
+004,5551234570,Alice Wilson,alice.wilson@email.com,qualified,test-campaign-001,endpoint-004,website,1,325000
+005,5551234571,Charlie Brown,charlie.brown@email.com,new,test-campaign-001,endpoint-005,social-media,2,680000 
