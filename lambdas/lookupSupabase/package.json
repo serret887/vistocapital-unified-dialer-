@@ -7,8 +7,11 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.38.0",
-    "aws-sdk": "^2.1490.0"
+    "@supabase/supabase-js": "^2.45.0",
+    "aws-sdk": "^2.1500.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   },
   "keywords": [
     "aws",

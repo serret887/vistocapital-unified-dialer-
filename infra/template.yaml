@@ -320,7 +320,7 @@ Resources:
       Role: !GetAtt SupabaseLookupLambdaRole.Arn
       CodeUri: ../lambdas/lookupSupabase/
       Handler: index.handler
-      Runtime: nodejs18.x
+      Runtime: nodejs20.x
       MemorySize: 256
       Timeout: 30
       Environment:
