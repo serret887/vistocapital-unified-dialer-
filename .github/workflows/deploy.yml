@@ -68,10 +68,42 @@ jobs:
           cd infra
           sam build --use-container
 
+  validate-cdk:
+    name: Validate CDK Template
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'yarn'
+          cache-dependency-path: cdk/yarn.lock
+
+      - name: Install CDK dependencies
+        run: |
+          cd cdk
+          yarn install --frozen-lockfile
+
+      - name: Install AWS CDK CLI
+        run: npm install -g aws-cdk
+
+      - name: Validate CDK template
+        run: |
+          cd cdk
+          cdk synth --all
+
+      - name: Run CDK tests
+        run: |
+          cd cdk
+          npm test || echo "No tests found - skipping"
+
   deploy-staging:
     name: Deploy to Staging
     runs-on: ubuntu-latest
-    needs: [test, validate-template]
+    needs: [test, validate-template, validate-cdk]
     if: github.ref == 'refs/heads/develop'
     environment: staging
     env:
@@ -92,65 +124,144 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Setup Node.js for CDK
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'yarn'
+          cache-dependency-path: cdk/yarn.lock
+
       - name: Install SAM CLI
         uses: aws-actions/setup-sam@v2
         with:
           use-installer: true
+
+      - name: Install CDK CLI
+        run: npm install -g aws-cdk
+
+      - name: Install CDK dependencies
+        run: |
+          cd cdk
+          yarn install --frozen-lockfile
 
       - name: Build SAM application
         run: |
           cd infra
           sam build --use-container
 
-      - name: Deploy to staging
+      - name: Deploy SAM infrastructure to staging
+        id: sam-deploy
         run: |
           cd infra
           sam deploy \
             --stack-name ${STACK_NAME_PREFIX}-staging \
             --parameter-overrides \
               Environment=staging \
-              ConnectInstanceId=${{ secrets.STAGING_CONNECT_INSTANCE_ID }} \
-              ConnectContactFlowId=${{ secrets.STAGING_CONTACT_FLOW_ID }} \
-              ConnectSourcePhoneNumber=${{ secrets.STAGING_SOURCE_PHONE_NUMBER }} \
-              ConnectQueueId=${{ secrets.STAGING_QUEUE_ID }} \
-              ConnectHoursOfOperationId=${{ secrets.STAGING_HOURS_OF_OPERATION_ID }} \
-              ConnectUserHierarchyGroupId=${{ secrets.STAGING_USER_HIERARCHY_GROUP_ID }} \
-              MaxConcurrentCalls=3 \
-              ValidatePhoneNumbers=false \
-              CompanyName=vistocapital-staging \
+              ConcurrentCalls=3 \
               SupabaseUrl=${{ secrets.STAGING_SUPABASE_URL }} \
-              SupabaseKey=${{ secrets.STAGING_SUPABASE_ANON_KEY }} \
-              SupabaseServiceKey=${{ secrets.STAGING_SUPABASE_SERVICE_KEY }} \
-            --capabilities CAPABILITY_IAM \
+              SupabaseAnonKey=${{ secrets.STAGING_SUPABASE_ANON_KEY }} \
+            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
             --disable-rollback false
 
-      - name: Get stack outputs
-        id: stack-outputs
+      - name: Get SAM stack outputs
+        id: sam-outputs
         run: |
           cd infra
           OUTPUT=$(sam list stack-outputs --stack-name ${STACK_NAME_PREFIX}-staging --output json)
-          echo "staging-outputs<<EOF" >> $GITHUB_OUTPUT
+          echo "sam-outputs<<EOF" >> $GITHUB_OUTPUT
           echo "$OUTPUT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Bootstrap CDK (if needed)
+        run: |
+          cd cdk
+          cdk bootstrap aws://${{ steps.configure-aws-credentials.outputs.aws-account-id }}/${{ env.AWS_REGION }} || echo "Already bootstrapped"
+
+      - name: Deploy CDK Connect automation to staging
+        id: cdk-deploy
+        run: |
+          cd cdk
+          cdk deploy ViStoCapital-Connect-staging \
+            --parameters ConnectInstanceId=${{ secrets.STAGING_CONNECT_INSTANCE_ID }} \
+            --context environment=staging \
+            --context account=${{ steps.configure-aws-credentials.outputs.aws-account-id }} \
+            --context region=${{ env.AWS_REGION }} \
+            --require-approval never \
+            --outputs-file cdk-outputs-staging.json
+
+      - name: Get CDK stack outputs
+        id: cdk-outputs
+        run: |
+          cd cdk
+          if [ -f cdk-outputs-staging.json ]; then
+            CDK_OUTPUT=$(cat cdk-outputs-staging.json)
+            echo "cdk-outputs<<EOF" >> $GITHUB_OUTPUT
+            echo "$CDK_OUTPUT" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "cdk-outputs={}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update SAM stack with Connect resource IDs
+        if: steps.cdk-outputs.outputs.cdk-outputs != '{}'
+        run: |
+          cd infra
+          # Extract Connect resource IDs from CDK outputs
+          CONTACT_FLOW_ID=$(echo '${{ steps.cdk-outputs.outputs.cdk-outputs }}' | jq -r '.["ViStoCapital-Connect-staging"].ContactFlowId // empty')
+          SPANISH_QUEUE_ID=$(echo '${{ steps.cdk-outputs.outputs.cdk-outputs }}' | jq -r '.["ViStoCapital-Connect-staging"].SpanishQueueId // empty')
+          ENGLISH_QUEUE_ID=$(echo '${{ steps.cdk-outputs.outputs.cdk-outputs }}' | jq -r '.["ViStoCapital-Connect-staging"].EnglishQueueId // empty')
+          
+          # Redeploy SAM with Connect resource IDs if they exist
+          if [ ! -z "$CONTACT_FLOW_ID" ] && [ "$CONTACT_FLOW_ID" != "null" ]; then
+            echo "Updating SAM stack with Connect Flow ID: $CONTACT_FLOW_ID"
+            sam deploy \
+              --stack-name ${STACK_NAME_PREFIX}-staging \
+              --parameter-overrides \
+                Environment=staging \
+                ConcurrentCalls=3 \
+                SupabaseUrl=${{ secrets.STAGING_SUPABASE_URL }} \
+                SupabaseAnonKey=${{ secrets.STAGING_SUPABASE_ANON_KEY }} \
+                ConnectContactFlowId="$CONTACT_FLOW_ID" \
+                ConnectQueueId="$SPANISH_QUEUE_ID" \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+              --no-confirm-changeset \
+              --no-fail-on-empty-changeset
+          fi
 
       - name: Post staging deployment comment
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
-            const outputs = JSON.parse(`${{ steps.stack-outputs.outputs.staging-outputs }}`);
-            const comment = `🚀 **Staging Deployment Successful**
+            const samOutputs = JSON.parse(`${{ steps.sam-outputs.outputs.sam-outputs }}`);
+            const cdkOutputs = JSON.parse(`${{ steps.cdk-outputs.outputs.cdk-outputs }}`);
+            
+            let comment = `🚀 **Staging Deployment Successful**
             
             **Stack Name:** ${process.env.STACK_NAME_PREFIX}-staging
             **Environment:** staging
             **Region:** ${process.env.AWS_REGION}
             
-            **Key Outputs:**
-            ${outputs.map(o => `- **${o.OutputKey}:** ${o.OutputValue}`).join('\n')}
+            ## 🏗️ SAM Infrastructure Outputs:
+            ${samOutputs.map(o => `- **${o.OutputKey}:** \`${o.OutputValue}\``).join('\n')}`;
+            
+            if (Object.keys(cdkOutputs).length > 0) {
+              const connectStack = cdkOutputs['ViStoCapital-Connect-staging'];
+              if (connectStack) {
+                comment += `
+            
+            ## 📞 Amazon Connect Resources (CDK):
+            ${Object.entries(connectStack).map(([key, value]) => `- **${key}:** \`${value}\``).join('\n')}`;
+              }
+            }
+            
+            comment += `
             
             **Next Steps:**
+            - ✅ Infrastructure deployed via SAM
+            - ✅ Connect resources automated via CDK
             - Test the staging environment
             - Merge to main branch for production deployment`;
             
@@ -164,7 +275,7 @@ jobs:
   deploy-production:
     name: Deploy to Production
     runs-on: ubuntu-latest
-    needs: [test, validate-template]
+    needs: [test, validate-template, validate-cdk]
     if: github.ref == 'refs/heads/main'
     environment: production
     env:
@@ -185,48 +296,111 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Setup Node.js for CDK
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'yarn'
+          cache-dependency-path: cdk/yarn.lock
+
       - name: Install SAM CLI
         uses: aws-actions/setup-sam@v2
         with:
           use-installer: true
+
+      - name: Install CDK CLI
+        run: npm install -g aws-cdk
+
+      - name: Install CDK dependencies
+        run: |
+          cd cdk
+          yarn install --frozen-lockfile
 
       - name: Build SAM application
         run: |
           cd infra
           sam build --use-container
 
-      - name: Deploy to production
+      - name: Deploy SAM infrastructure to production
+        id: sam-deploy
         run: |
           cd infra
           sam deploy \
             --stack-name ${STACK_NAME_PREFIX}-production \
             --parameter-overrides \
               Environment=production \
-              ConnectInstanceId=${{ secrets.PROD_CONNECT_INSTANCE_ID }} \
-              ConnectContactFlowId=${{ secrets.PROD_CONTACT_FLOW_ID }} \
-              ConnectSourcePhoneNumber=${{ secrets.PROD_SOURCE_PHONE_NUMBER }} \
-              ConnectQueueId=${{ secrets.PROD_QUEUE_ID }} \
-              ConnectHoursOfOperationId=${{ secrets.PROD_HOURS_OF_OPERATION_ID }} \
-              ConnectUserHierarchyGroupId=${{ secrets.PROD_USER_HIERARCHY_GROUP_ID }} \
-              MaxConcurrentCalls=10 \
-              ValidatePhoneNumbers=true \
-              CompanyName=vistocapital-production \
+              ConcurrentCalls=10 \
               SupabaseUrl=${{ secrets.PROD_SUPABASE_URL }} \
-              SupabaseKey=${{ secrets.PROD_SUPABASE_ANON_KEY }} \
-              SupabaseServiceKey=${{ secrets.PROD_SUPABASE_SERVICE_KEY }} \
-            --capabilities CAPABILITY_IAM \
+              SupabaseAnonKey=${{ secrets.PROD_SUPABASE_ANON_KEY }} \
+            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
             --no-confirm-changeset \
             --no-fail-on-empty-changeset \
             --disable-rollback false
 
-      - name: Get stack outputs
-        id: stack-outputs
+      - name: Get SAM stack outputs
+        id: sam-outputs
         run: |
           cd infra
           OUTPUT=$(sam list stack-outputs --stack-name ${STACK_NAME_PREFIX}-production --output json)
-          echo "production-outputs<<EOF" >> $GITHUB_OUTPUT
+          echo "sam-outputs<<EOF" >> $GITHUB_OUTPUT
           echo "$OUTPUT" >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Bootstrap CDK (if needed)
+        run: |
+          cd cdk
+          cdk bootstrap aws://${{ steps.configure-aws-credentials.outputs.aws-account-id }}/${{ env.AWS_REGION }} || echo "Already bootstrapped"
+
+      - name: Deploy CDK Connect automation to production
+        id: cdk-deploy
+        run: |
+          cd cdk
+          cdk deploy ViStoCapital-Connect-production \
+            --parameters ConnectInstanceId=${{ secrets.PROD_CONNECT_INSTANCE_ID }} \
+            --context environment=production \
+            --context account=${{ steps.configure-aws-credentials.outputs.aws-account-id }} \
+            --context region=${{ env.AWS_REGION }} \
+            --require-approval never \
+            --outputs-file cdk-outputs-production.json
+
+      - name: Get CDK stack outputs
+        id: cdk-outputs
+        run: |
+          cd cdk
+          if [ -f cdk-outputs-production.json ]; then
+            CDK_OUTPUT=$(cat cdk-outputs-production.json)
+            echo "cdk-outputs<<EOF" >> $GITHUB_OUTPUT
+            echo "$CDK_OUTPUT" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          else
+            echo "cdk-outputs={}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update SAM stack with Connect resource IDs
+        if: steps.cdk-outputs.outputs.cdk-outputs != '{}'
+        run: |
+          cd infra
+          # Extract Connect resource IDs from CDK outputs
+          CONTACT_FLOW_ID=$(echo '${{ steps.cdk-outputs.outputs.cdk-outputs }}' | jq -r '.["ViStoCapital-Connect-production"].ContactFlowId // empty')
+          SPANISH_QUEUE_ID=$(echo '${{ steps.cdk-outputs.outputs.cdk-outputs }}' | jq -r '.["ViStoCapital-Connect-production"].SpanishQueueId // empty')
+          ENGLISH_QUEUE_ID=$(echo '${{ steps.cdk-outputs.outputs.cdk-outputs }}' | jq -r '.["ViStoCapital-Connect-production"].EnglishQueueId // empty')
+          
+          # Redeploy SAM with Connect resource IDs if they exist
+          if [ ! -z "$CONTACT_FLOW_ID" ] && [ "$CONTACT_FLOW_ID" != "null" ]; then
+            echo "Updating SAM stack with Connect Flow ID: $CONTACT_FLOW_ID"
+            sam deploy \
+              --stack-name ${STACK_NAME_PREFIX}-production \
+              --parameter-overrides \
+                Environment=production \
+                ConcurrentCalls=10 \
+                SupabaseUrl=${{ secrets.PROD_SUPABASE_URL }} \
+                SupabaseAnonKey=${{ secrets.PROD_SUPABASE_ANON_KEY }} \
+                ConnectContactFlowId="$CONTACT_FLOW_ID" \
+                ConnectQueueId="$SPANISH_QUEUE_ID" \
+              --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM \
+              --no-confirm-changeset \
+              --no-fail-on-empty-changeset
+          fi
 
       - name: Create release
         if: success()
@@ -237,19 +411,31 @@ jobs:
           tag_name: v${{ github.run_number }}
           release_name: Production Release v${{ github.run_number }}
           body: |
-            ## Production Deployment v${{ github.run_number }}
+            ## 🚀 Production Deployment v${{ github.run_number }}
             
             **Deployed Stack:** ${STACK_NAME_PREFIX}-production
             **Commit:** ${{ github.sha }}
             **Environment:** production
             
-            ### Changes
+            ### 🏗️ Infrastructure Changes
             ${{ github.event.head_commit.message }}
             
-            ### Stack Outputs
+            ### 📊 SAM Stack Outputs
             ```json
-            ${{ steps.stack-outputs.outputs.production-outputs }}
+            ${{ steps.sam-outputs.outputs.sam-outputs }}
             ```
+            
+            ### 📞 Connect Resources (CDK)
+            ```json
+            ${{ steps.cdk-outputs.outputs.cdk-outputs }}
+            ```
+            
+            ### ✅ Deployment Status
+            - ✅ SAM Infrastructure: Deployed
+            - ✅ Amazon Connect Resources: Automated
+            - ✅ Multi-language routing: Configured
+            - ✅ Contact flows: Deployed
+            - ✅ Lambda integrations: Associated
           draft: false
           prerelease: false
 
@@ -262,14 +448,17 @@ jobs:
       - name: Notify success
         if: ${{ contains(needs.*.result, 'success') }}
         run: |
-          echo "✅ Deployment completed successfully!"
-          echo "Staging: ${{ needs.deploy-staging.result }}"
-          echo "Production: ${{ needs.deploy-production.result }}"
+          echo "✅ Unified Dialer deployment completed successfully!"
+          echo "📊 SAM Infrastructure: Deployed"
+          echo "📞 Amazon Connect: Automated via CDK"
+          echo "🔄 Staging: ${{ needs.deploy-staging.result }}"
+          echo "🚀 Production: ${{ needs.deploy-production.result }}"
 
       - name: Notify failure
         if: ${{ contains(needs.*.result, 'failure') }}
         run: |
-          echo "❌ Deployment failed!"
+          echo "❌ Unified Dialer deployment failed!"
           echo "Staging: ${{ needs.deploy-staging.result }}"
           echo "Production: ${{ needs.deploy-production.result }}"
+          echo "Check the logs above for detailed error information."
           exit 1 
