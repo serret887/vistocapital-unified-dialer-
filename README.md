@@ -11,6 +11,7 @@ A comprehensive, Supabase-aware omnichannel dialer stack built on AWS Connect fo
 - Node.js 18+ (for Lambda functions)
 - Python 3.9+ (for Lambda functions)
 - Git
+- **Amazon Connect Instance** (must be created and configured separately)
 
 ### Setup
 
@@ -31,6 +32,21 @@ A comprehensive, Supabase-aware omnichannel dialer stack built on AWS Connect fo
    cd infra
    sam build && sam deploy --guided
    ```
+
+4. **⚠️ CRITICAL: Configure Amazon Connect Resources**
+   
+   **The CI/CD deployment only creates supporting AWS infrastructure (Lambda, DynamoDB, S3, etc.).** 
+   
+   **Amazon Connect resources (contact flows, queues, routing) must be configured manually:**
+   
+   📖 **Follow the detailed guide**: [AMAZON_CONNECT_SETUP_GUIDE.md](AMAZON_CONNECT_SETUP_GUIDE.md)
+   
+   Key steps:
+   - Import contact flow from `contact-flows/UnifiedDialerContactFlow.json`
+   - Add deployed Lambda functions to Connect integration
+   - Create English and Spanish queues
+   - Configure routing profiles for language-based routing
+   - Update GitHub secrets with actual Connect resource IDs
 
 ## 📁 Project Structure
 
@@ -148,10 +164,12 @@ sam build && sam deploy --config-env dev
 
 The system includes automated CI/CD via GitHub Actions:
 
-1. **Push to develop** → Staging deployment
-2. **Push to main** → Production deployment
+1. **Push to develop** → Staging deployment (AWS infrastructure only)
+2. **Push to main** → Production deployment (AWS infrastructure only)
 3. **Automatic rollback** on deployment failures
 4. **Environment protection** rules for production
+
+**⚠️ Important**: CI/CD only deploys AWS infrastructure. Amazon Connect resources require manual configuration per [AMAZON_CONNECT_SETUP_GUIDE.md](AMAZON_CONNECT_SETUP_GUIDE.md).
 
 For deployment details, see [DEPLOYMENT_SUMMARY.md](DEPLOYMENT_SUMMARY.md).
 
