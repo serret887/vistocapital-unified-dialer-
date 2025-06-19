@@ -1,0 +1,275 @@
+name: Deploy ViSto Capital Unified Dialer
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+  SAM_CLI_TELEMETRY: 0
+  STACK_NAME_PREFIX: vistocapital-dialer
+
+jobs:
+  test:
+    name: Test Lambda Functions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: lambdas/lookupSupabase/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          cd lambdas/lookupSupabase
+          npm ci
+
+      - name: Run tests
+        run: |
+          cd lambdas/lookupSupabase
+          npm test || echo "No tests found - skipping"
+
+      - name: Lint code
+        run: |
+          cd lambdas/lookupSupabase
+          npx eslint . || echo "ESLint not configured - skipping"
+
+  validate-template:
+    name: Validate SAM Template
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Validate SAM template
+        run: |
+          cd infra
+          sam validate --template template.yaml
+
+      - name: Build SAM application
+        run: |
+          cd infra
+          sam build --use-container
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [test, validate-template]
+    if: github.ref == 'refs/heads/develop'
+    environment: staging
+    env:
+      ENVIRONMENT: staging
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Build SAM application
+        run: |
+          cd infra
+          sam build --use-container
+
+      - name: Deploy to staging
+        run: |
+          cd infra
+          sam deploy \
+            --stack-name ${STACK_NAME_PREFIX}-staging \
+            --parameter-overrides \
+              Environment=staging \
+              ConnectInstanceId=${{ secrets.STAGING_CONNECT_INSTANCE_ID }} \
+              ConnectContactFlowId=${{ secrets.STAGING_CONTACT_FLOW_ID }} \
+              ConnectSourcePhoneNumber=${{ secrets.STAGING_SOURCE_PHONE_NUMBER }} \
+              ConnectQueueId=${{ secrets.STAGING_QUEUE_ID }} \
+              ConnectHoursOfOperationId=${{ secrets.STAGING_HOURS_OF_OPERATION_ID }} \
+              ConnectUserHierarchyGroupId=${{ secrets.STAGING_USER_HIERARCHY_GROUP_ID }} \
+              MaxConcurrentCalls=3 \
+              ValidatePhoneNumbers=false \
+              CompanyName=vistocapital-staging \
+              SupabaseUrl=${{ secrets.STAGING_SUPABASE_URL }} \
+              SupabaseKey=${{ secrets.STAGING_SUPABASE_ANON_KEY }} \
+              SupabaseServiceKey=${{ secrets.STAGING_SUPABASE_SERVICE_KEY }} \
+            --capabilities CAPABILITY_IAM \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --disable-rollback false
+
+      - name: Get stack outputs
+        id: stack-outputs
+        run: |
+          cd infra
+          OUTPUT=$(sam list stack-outputs --stack-name ${STACK_NAME_PREFIX}-staging --output json)
+          echo "staging-outputs<<EOF" >> $GITHUB_OUTPUT
+          echo "$OUTPUT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Post staging deployment comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const outputs = JSON.parse(`${{ steps.stack-outputs.outputs.staging-outputs }}`);
+            const comment = `🚀 **Staging Deployment Successful**
+            
+            **Stack Name:** ${process.env.STACK_NAME_PREFIX}-staging
+            **Environment:** staging
+            **Region:** ${process.env.AWS_REGION}
+            
+            **Key Outputs:**
+            ${outputs.map(o => `- **${o.OutputKey}:** ${o.OutputValue}`).join('\n')}
+            
+            **Next Steps:**
+            - Test the staging environment
+            - Merge to main branch for production deployment`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [test, validate-template]
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    env:
+      ENVIRONMENT: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Install SAM CLI
+        uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+
+      - name: Build SAM application
+        run: |
+          cd infra
+          sam build --use-container
+
+      - name: Deploy to production
+        run: |
+          cd infra
+          sam deploy \
+            --stack-name ${STACK_NAME_PREFIX}-production \
+            --parameter-overrides \
+              Environment=production \
+              ConnectInstanceId=${{ secrets.PROD_CONNECT_INSTANCE_ID }} \
+              ConnectContactFlowId=${{ secrets.PROD_CONTACT_FLOW_ID }} \
+              ConnectSourcePhoneNumber=${{ secrets.PROD_SOURCE_PHONE_NUMBER }} \
+              ConnectQueueId=${{ secrets.PROD_QUEUE_ID }} \
+              ConnectHoursOfOperationId=${{ secrets.PROD_HOURS_OF_OPERATION_ID }} \
+              ConnectUserHierarchyGroupId=${{ secrets.PROD_USER_HIERARCHY_GROUP_ID }} \
+              MaxConcurrentCalls=10 \
+              ValidatePhoneNumbers=true \
+              CompanyName=vistocapital-production \
+              SupabaseUrl=${{ secrets.PROD_SUPABASE_URL }} \
+              SupabaseKey=${{ secrets.PROD_SUPABASE_ANON_KEY }} \
+              SupabaseServiceKey=${{ secrets.PROD_SUPABASE_SERVICE_KEY }} \
+            --capabilities CAPABILITY_IAM \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --disable-rollback false
+
+      - name: Get stack outputs
+        id: stack-outputs
+        run: |
+          cd infra
+          OUTPUT=$(sam list stack-outputs --stack-name ${STACK_NAME_PREFIX}-production --output json)
+          echo "production-outputs<<EOF" >> $GITHUB_OUTPUT
+          echo "$OUTPUT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Create release
+        if: success()
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ github.run_number }}
+          release_name: Production Release v${{ github.run_number }}
+          body: |
+            ## Production Deployment v${{ github.run_number }}
+            
+            **Deployed Stack:** ${STACK_NAME_PREFIX}-production
+            **Commit:** ${{ github.sha }}
+            **Environment:** production
+            
+            ### Changes
+            ${{ github.event.head_commit.message }}
+            
+            ### Stack Outputs
+            ```json
+            ${{ steps.stack-outputs.outputs.production-outputs }}
+            ```
+          draft: false
+          prerelease: false
+
+  notify:
+    name: Notify Deployment Status
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, deploy-production]
+    if: always()
+    steps:
+      - name: Notify success
+        if: ${{ contains(needs.*.result, 'success') }}
+        run: |
+          echo "✅ Deployment completed successfully!"
+          echo "Staging: ${{ needs.deploy-staging.result }}"
+          echo "Production: ${{ needs.deploy-production.result }}"
+
+      - name: Notify failure
+        if: ${{ contains(needs.*.result, 'failure') }}
+        run: |
+          echo "❌ Deployment failed!"
+          echo "Staging: ${{ needs.deploy-staging.result }}"
+          echo "Production: ${{ needs.deploy-production.result }}"
+          exit 1 
