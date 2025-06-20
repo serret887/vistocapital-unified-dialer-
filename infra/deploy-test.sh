@@ -52,6 +52,7 @@ sam deploy \
     --region $REGION \
     --capabilities CAPABILITY_IAM \
     --no-disable-rollback \
+    --resolve-s3 \
     --parameter-overrides \
         ConnectInstanceId=$CONNECT_INSTANCE_ID \
         ConnectContactFlowId=$CONNECT_CONTACT_FLOW_ID \
