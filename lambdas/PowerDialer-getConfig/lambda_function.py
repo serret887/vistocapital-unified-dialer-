@@ -16,13 +16,15 @@ def get_parameters(deployment):
     
     config={}
     next_token = None
+    ssm_base_path = os.environ['SSM_BASE_PATH']
+    ssm_path = f"{ssm_base_path}/{deployment}/"
 
     try:
         while True:
             if next_token:
-                ssmresponse = ssm.get_parameters_by_path(Path='/connect/dialer/'+deployment+'/',NextToken=next_token)
+                ssmresponse = ssm.get_parameters_by_path(Path=ssm_path,NextToken=next_token)
             else:
-                ssmresponse = ssm.get_parameters_by_path(Path='/connect/dialer/'+deployment+'/')
+                ssmresponse = ssm.get_parameters_by_path(Path=ssm_path)
             for parameter in ssmresponse['Parameters']:
                 if(parameter['Value'].isnumeric()):
                    config[parameter['Name'].split("/")[-1]]=int(parameter['Value'])

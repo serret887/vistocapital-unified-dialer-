@@ -308,3 +308,46 @@ def get_call_preferences(phoneNumber,customerProfileDomain):
             return cp['Items'][0].get('Attributes',None)
         else:
             return None
+
+def set_parameter(parameter,value,deployment):
+    ssm_base_path = os.environ['SSM_BASE_PATH']
+    ssm_path = f"{ssm_base_path}/{deployment}/{parameter}"
+    try:
+        ssmresponse = ssm.put_parameter(Name=ssm_path,Value=value,Type='String',Overwrite=True)
+    except ClientError as e:
+        print(e.response['Error']['Code'])
+        return "Error"
+    else:
+        return "Success"
+
+def del_parameter(parameter,deployment):
+    ssm_base_path = os.environ['SSM_BASE_PATH']
+    ssm_path = f"{ssm_base_path}/{deployment}/{parameter}"
+    try:
+        ssmresponse = ssm.delete_parameter(Name=ssm_path)
+    except ClientError as e:
+        print(e.response['Error']['Code'])
+        return "Error"
+    else:
+        return "Success"
+
+def get_parameter(parameter,deployment):
+    ssm_base_path = os.environ['SSM_BASE_PATH']
+    ssm_path = f"{ssm_base_path}/{deployment}/{parameter}"
+    try:
+        ssmresponse = ssm.get_parameter(Name=ssm_path)
+    except ClientError as e:
+        print(e.response['Error']['Code'])
+        return "Error"
+    else:
+        return ssmresponse['Parameter']['Value']
+
+def toggle_dialer(deployment,status):
+    ssm_base_path = os.environ['SSM_BASE_PATH']
+    ssm_path = f"{ssm_base_path}/{deployment}/activeDialer"
+    try:
+        ssmresponse = ssm.put_parameter(Name=ssm_path,Value=status,Overwrite=True)
+    except:
+        return "Error"
+    else:
+        return "Success"

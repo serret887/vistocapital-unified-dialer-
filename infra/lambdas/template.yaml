@@ -1,0 +1,376 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: "Lambda Functions for the Unified Dialer"
+
+Parameters:
+  SsmBasePath:
+    Type: String
+  UnifiedDialerLambdaRoleArn:
+    Type: String
+  SupabaseLookupLambdaRoleArn:
+    Type: String
+  SupabaseSecretArn:
+    Type: String
+  LeadCacheTable:
+    Type: String
+  ConnectInstanceId:
+    Type: String
+  Region:
+    Type: String
+  AccountId:
+    Type: String
+
+Resources:
+  LookupSupabaseFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !Ref SupabaseLookupLambdaRoleArn
+      CodeUri: ../../lambdas/lookupSupabase/
+      Handler: index.handler
+      Runtime: nodejs20.x
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          SUPABASE_SECRET_ARN: !Ref SupabaseSecretArn
+          LEAD_CACHE_TABLE: !Ref LeadCacheTable
+
+  PowerDialerGetConfigFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !Ref UnifiedDialerLambdaRoleArn
+      CodeUri: ../../lambdas/PowerDialer-getConfig/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Environment:
+        Variables:
+          SSM_BASE_PATH: !Ref SsmBasePath
+          DIALER_DEPLOYMENT: !Ref AWS::StackName
+
+  PowerDialerLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub "${AWS::StackName}-PowerDialerLayer"
+      Description: "PowerDialer common functions"
+      ContentUri: ../../lambdas/PowerDialer-layer/
+      CompatibleRuntimes:
+        - python3.9
+      LicenseInfo: 'MIT'
+      RetentionPolicy: Retain
+
+  BlasterLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub "${AWS::StackName}-BlasterLayer"
+      Description: "Blaster common functions"
+      ContentUri: ../../lambdas/Blaster-layer/
+      CompatibleRuntimes:
+        - python3.9
+      LicenseInfo: 'MIT'
+      RetentionPolicy: Retain
+
+  BlasterConnectStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !Ref UnifiedDialerLambdaRoleArn
+      CodeUri: ../../lambdas/Blaster-connectStatus/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref BlasterLayer
+      Environment:
+        Variables:
+          SSM_BASE_PATH: !Ref SsmBasePath
+          DIALER_DEPLOYMENT: !Ref AWS::StackName
+  
+  BlasterDialFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !Ref UnifiedDialerLambdaRoleArn
+      CodeUri: ../../lambdas/Blaster-dial/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref BlasterLayer
+      Environment:
+        Variables:
+          SSM_BASE_PATH: !Ref SsmBasePath
+          DIALER_DEPLOYMENT: !Ref AWS::StackName
+
+  BlasterGetConfigFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !Ref UnifiedDialerLambdaRoleArn
+      CodeUri: ../../lambdas/Blaster-getConfig/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref BlasterLayer
+      Environment:
+        Variables:
+          SSM_BASE_PATH: !Ref SsmBasePath
+          DIALER_DEPLOYMENT: !Ref AWS::StackName
+
+  BlasterGetContactsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !Ref UnifiedDialerLambdaRoleArn
+      CodeUri: ../../lambdas/Blaster-getContacts/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref BlasterLayer
+      Environment:
+        Variables:
+          SSM_BASE_PATH: !Ref SsmBasePath
+          DIALER_DEPLOYMENT: !Ref AWS::StackName
+
+  BlasterListLoadFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !Ref UnifiedDialerLambdaRoleArn
+      CodeUri: ../../lambdas/Blaster-ListLoad/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref BlasterLayer
+      Environment:
+        Variables:
+          SSM_BASE_PATH: !Ref SsmBasePath
+          DIALER_DEPLOYMENT: !Ref AWS::StackName
+
+  BlasterProcessContactEventsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !Ref UnifiedDialerLambdaRoleArn
+      CodeUri: ../../lambdas/Blaster-ProcessContactEvents/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref BlasterLayer
+      Environment:
+        Variables:
+          SSM_BASE_PATH: !Ref SsmBasePath
+          DIALER_DEPLOYMENT: !Ref AWS::StackName
+
+  BlasterQueueContactsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !Ref UnifiedDialerLambdaRoleArn
+      CodeUri: ../../lambdas/Blaster-queueContacts/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref BlasterLayer
+      Environment:
+        Variables:
+          SSM_BASE_PATH: !Ref SsmBasePath
+          DIALER_DEPLOYMENT: !Ref AWS::StackName
+
+  BlasterSetDispositionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !Ref UnifiedDialerLambdaRoleArn
+      CodeUri: ../../lambdas/Blaster-setDisposition/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref BlasterLayer
+      Environment:
+        Variables:
+          SSM_BASE_PATH: !Ref SsmBasePath
+          DIALER_DEPLOYMENT: !Ref AWS::StackName
+
+  PowerDialerConnectStatusFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !Ref UnifiedDialerLambdaRoleArn
+      CodeUri: ../../lambdas/PowerDialer-connectStatus/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref PowerDialerLayer
+      Environment:
+        Variables:
+          SSM_BASE_PATH: !Ref SsmBasePath
+          DIALER_DEPLOYMENT: !Ref AWS::StackName
+
+  PowerDialerDialFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !Ref UnifiedDialerLambdaRoleArn
+      CodeUri: ../../lambdas/PowerDialer-dial/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref PowerDialerLayer
+      Environment:
+        Variables:
+          SSM_BASE_PATH: !Ref SsmBasePath
+          DIALER_DEPLOYMENT: !Ref AWS::StackName
+
+  PowerDialerGetAvailAgentsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !Ref UnifiedDialerLambdaRoleArn
+      CodeUri: ../../lambdas/PowerDialer-getAvailAgents/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref PowerDialerLayer
+      Environment:
+        Variables:
+          SSM_BASE_PATH: !Ref SsmBasePath
+          DIALER_DEPLOYMENT: !Ref AWS::StackName
+
+  PowerDialerGetContactsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !Ref UnifiedDialerLambdaRoleArn
+      CodeUri: ../../lambdas/PowerDialer-getContacts/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref PowerDialerLayer
+      Environment:
+        Variables:
+          SSM_BASE_PATH: !Ref SsmBasePath
+          DIALER_DEPLOYMENT: !Ref AWS::StackName
+
+  PowerDialerListLoadFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !Ref UnifiedDialerLambdaRoleArn
+      CodeUri: ../../lambdas/PowerDialer-ListLoad/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref PowerDialerLayer
+      Environment:
+        Variables:
+          SSM_BASE_PATH: !Ref SsmBasePath
+          DIALER_DEPLOYMENT: !Ref AWS::StackName
+
+  PowerDialerProcessContactEventsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !Ref UnifiedDialerLambdaRoleArn
+      CodeUri: ../../lambdas/PowerDialer-ProcessContactEvents/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref PowerDialerLayer
+      Environment:
+        Variables:
+          SSM_BASE_PATH: !Ref SsmBasePath
+          DIALER_DEPLOYMENT: !Ref AWS::StackName
+
+  PowerDialerQueueContactsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !Ref UnifiedDialerLambdaRoleArn
+      CodeUri: ../../lambdas/PowerDialer-queueContacts/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref PowerDialerLayer
+      Environment:
+        Variables:
+          SSM_BASE_PATH: !Ref SsmBasePath
+          DIALER_DEPLOYMENT: !Ref AWS::StackName
+
+  PowerDialerSaveResultsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !Ref UnifiedDialerLambdaRoleArn
+      CodeUri: ../../lambdas/PowerDialer-SaveResults/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref PowerDialerLayer
+      Environment:
+        Variables:
+          SSM_BASE_PATH: !Ref SsmBasePath
+          DIALER_DEPLOYMENT: !Ref AWS::StackName
+
+  PowerDialerSetDispositionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !Ref UnifiedDialerLambdaRoleArn
+      CodeUri: ../../lambdas/PowerDialer-setDisposition/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref PowerDialerLayer
+      Environment:
+        Variables:
+          SSM_BASE_PATH: !Ref SsmBasePath
+          DIALER_DEPLOYMENT: !Ref AWS::StackName
+
+  PowerDialerUpdateProfileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !Ref UnifiedDialerLambdaRoleArn
+      CodeUri: ../../lambdas/PowerDialer-updateProfile/
+      Handler: lambda_function.lambda_handler
+      Runtime: python3.9
+      Layers:
+        - !Ref PowerDialerLayer
+      Environment:
+        Variables:
+          SSM_BASE_PATH: !Ref SsmBasePath
+          DIALER_DEPLOYMENT: !Ref AWS::StackName
+
+  ConnectLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !GetAtt LookupSupabaseFunction.Arn
+      Principal: connect.amazonaws.com
+      SourceArn: !Sub 'arn:aws:connect:${Region}:${AccountId}:instance/${ConnectInstanceId}/*'
+
+Outputs:
+  LookupSupabaseFunctionArn:
+    Description: "Supabase Lookup Lambda Function ARN for Connect integration"
+    Value: !GetAtt LookupSupabaseFunction.Arn
+
+  PowerDialerGetConfigFunctionArn:
+    Description: "PowerDialer GetConfig Lambda Function ARN"
+    Value: !GetAtt PowerDialerGetConfigFunction.Arn
+
+  BlasterConnectStatusFunctionArn:
+    Value: !GetAtt BlasterConnectStatusFunction.Arn
+  BlasterDialFunctionArn:
+    Value: !GetAtt BlasterDialFunction.Arn
+  BlasterGetConfigFunctionArn:
+    Value: !GetAtt BlasterGetConfigFunction.Arn
+  BlasterGetContactsFunctionArn:
+    Value: !GetAtt BlasterGetContactsFunction.Arn
+  BlasterListLoadFunctionArn:
+    Value: !GetAtt BlasterListLoadFunction.Arn
+  BlasterProcessContactEventsFunctionArn:
+    Value: !GetAtt BlasterProcessContactEventsFunction.Arn
+  BlasterQueueContactsFunctionArn:
+    Value: !GetAtt BlasterQueueContactsFunction.Arn
+  BlasterSetDispositionFunctionArn:
+    Value: !GetAtt BlasterSetDispositionFunction.Arn
+  PowerDialerConnectStatusFunctionArn:
+    Value: !GetAtt PowerDialerConnectStatusFunction.Arn
+  PowerDialerDialFunctionArn:
+    Value: !GetAtt PowerDialerDialFunction.Arn
+  PowerDialerGetAvailAgentsFunctionArn:
+    Value: !GetAtt PowerDialerGetAvailAgentsFunction.Arn
+  PowerDialerGetContactsFunctionArn:
+    Value: !GetAtt PowerDialerGetContactsFunction.Arn
+  PowerDialerListLoadFunctionArn:
+    Value: !GetAtt PowerDialerListLoadFunction.Arn
+  PowerDialerProcessContactEventsFunctionArn:
+    Value: !GetAtt PowerDialerProcessContactEventsFunction.Arn
+  PowerDialerQueueContactsFunctionArn:
+    Value: !GetAtt PowerDialerQueueContactsFunction.Arn
+  PowerDialerSaveResultsFunctionArn:
+    Value: !GetAtt PowerDialerSaveResultsFunction.Arn
+  PowerDialerSetDispositionFunctionArn:
+    Value: !GetAtt PowerDialerSetDispositionFunction.Arn
+  PowerDialerUpdateProfileFunctionArn:
+    Value: !GetAtt PowerDialerUpdateProfileFunction.Arn 

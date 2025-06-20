@@ -1,0 +1,193 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: "IAM Resources for the Unified Dialer"
+
+Parameters:
+  DialingListBucketArn:
+    Type: String
+  ResultsBucketArn:
+    Type: String
+  ActiveDialingTableArn:
+    Type: String
+  LeadCacheTableArn:
+    Type: String
+  SupabaseSecretArn:
+    Type: String
+
+Resources:
+  KinesisFirehoseDeliveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - firehose.amazonaws.com
+                - s3.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      Policies:
+        - PolicyName: deliveryToS3
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: deliveryToS3
+                Effect: Allow
+                Action:
+                  - s3:AbortMultipartUpload
+                  - s3:GetBucketLocation
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:ListBucketMultipartUploads
+                  - s3:PutObject
+                Resource: "*"
+
+  UnifiedDialerLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaKinesisExecutionRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:PutObject'
+                  - 's3:GetObject'
+                  - 's3:DeleteObject'
+                  - 's3:ListBucket'
+                Resource:
+                  - !Ref DialingListBucketArn
+                  - !Sub '${DialingListBucketArn}/*'
+                  - !Ref ResultsBucketArn
+                  - !Sub '${ResultsBucketArn}/*'
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:PutItem'
+                  - 'dynamodb:DeleteItem'
+                  - 'dynamodb:GetItem'
+                  - 'dynamodb:Scan'
+                  - 'dynamodb:Query'
+                  - 'dynamodb:UpdateItem'
+                Resource:
+                  - !Ref ActiveDialingTableArn
+                  - !Ref LeadCacheTableArn
+        - PolicyName: StepFunctionTaskToken
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'states:SendTaskSuccess'
+                  - 'states:SendTaskFailure'
+                  - 'states:SendTaskHeartbeat'
+                Resource: '*'
+        - PolicyName: ConnectPermissions
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'connect:StartOutboundVoiceContact'
+                  - 'connect:DescribeHoursOfOperation'
+                  - 'connect:GetCurrentMetricData'
+                  - 'connect:DescribeQueue'
+                  - 'connect:CreateProfile'
+                  - 'profile:DeleteProfile'
+                  - 'profile:UpdateProfile'
+                  - 'profile:SearchProfiles'
+                  - 'connect:GetContactAttributes'
+                  - 'connect:UpdateContactAttributes'
+                Resource: '*'
+        - PolicyName: ParameterAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ssm:GetParametersByPath'
+                  - 'ssm:GetParameter'
+                  - 'ssm:PutParameter'
+                Resource: '*'
+        - PolicyName: DataStreamAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'firehose:*'
+                  - 'kinesis:*'
+                  - 'sqs:*'
+                Resource: '*'
+        - PolicyName: PinpointAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'mobiletargeting:GetVoiceTemplate'
+                  - 'mobiletargeting:GetCampaign'
+                  - 'mobiletargeting:GetSegment'
+                  - 'mobiletargeting:PhoneNumberValidate'
+                  - 'mobiletargeting:UpdateCampaign'
+                  - 'mobiletargeting:PutEvents'
+                Resource: '*'
+
+  SupabaseLookupLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBCacheAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'dynamodb:PutItem'
+                  - 'dynamodb:GetItem'
+                  - 'dynamodb:UpdateItem'
+                Resource: !Ref LeadCacheTableArn
+        - PolicyName: SecretsManagerAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'secretsmanager:GetSecretValue'
+                Resource: !Ref SupabaseSecretArn
+
+Outputs:
+  KinesisFirehoseDeliveryRoleArn:
+    Description: "ARN for the Kinesis Firehose Delivery Role"
+    Value: !GetAtt KinesisFirehoseDeliveryRole.Arn
+  UnifiedDialerLambdaRoleArn:
+    Description: "ARN for the Unified Dialer Lambda Role"
+    Value: !GetAtt UnifiedDialerLambdaRole.Arn
+  SupabaseLookupLambdaRoleArn:
+    Description: "ARN for the Supabase Lookup Lambda Role"
+    Value: !GetAtt SupabaseLookupLambdaRole.Arn 

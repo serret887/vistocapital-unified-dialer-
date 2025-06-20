@@ -42,7 +42,6 @@ if [[ -z "$STACK_NAME" || -z "$AWS_REGION" || -z "$CONNECT_INSTANCE_ID" || -z "$
     exit 1
 fi
 
-echo ""
 echo "🔧 Building SAM Application"
 echo "============================"
 

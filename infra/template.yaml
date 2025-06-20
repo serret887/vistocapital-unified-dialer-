@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Unified Omnichannel Dialer for Amazon Connect
+Description: Unified Omnichannel Dialer for Amazon Connect - Root Stack
 
 Tags:
   Environment: !Ref Environment
@@ -67,269 +67,70 @@ Parameters:
     Description: 'Environment designation for resource tagging'
 
 Resources:
-  # === S3 Buckets ===
-  DialingListBucket:
-    Type: AWS::S3::Bucket
+  StorageStack:
+    Type: AWS::Serverless::Application
     Properties:
-      BucketName: !Join ['-', [!Ref AWS::StackName,'input-bucket', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]]]
-      NotificationConfiguration:
-        EventBridgeConfiguration:
-          EventBridgeEnabled: True
-    DeletionPolicy: Delete
-
-  ResultsBucket:
-    Type: AWS::S3::Bucket
+      Location: ./storage/template.yaml
+      Parameters:
+        StackName: !Ref AWS::StackName
+        StackId: !Ref AWS::StackId
+  
+  ConfigStack:
+    Type: AWS::Serverless::Application
     Properties:
-      BucketName: !Join ['-', [!Ref AWS::StackName,'output-bucket', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]]]
-    DeletionPolicy: Delete
-
-  # === DynamoDB Tables ===
-  ActiveDialingTable:
-    Type: AWS::DynamoDB::Table
-    Properties: 
-      AttributeDefinitions: 
-        - AttributeName: "contactId"
-          AttributeType: "S"
-      KeySchema: 
-        - AttributeName: "contactId"
-          KeyType: "HASH"
-      BillingMode: "PAY_PER_REQUEST"
-      PointInTimeRecoverySpecification: 
-        PointInTimeRecoveryEnabled: True
-      SSESpecification:
-        SSEEnabled: True
-      TimeToLiveSpecification:
-          AttributeName: "TimeToLive"
-          Enabled: True
-
-  LeadCacheTable:
-    Type: AWS::DynamoDB::Table
+      Location: ./config/template.yaml
+      Parameters:
+        StackName: !Ref AWS::StackName
+        SupabaseUrl: !Ref SupabaseUrl
+        SupabaseAnonKey: !Ref SupabaseAnonKey
+  
+  IamStack:
+    Type: AWS::Serverless::Application
     Properties:
-      AttributeDefinitions:
-        - AttributeName: "customerNumber"
-          AttributeType: "S"
-      KeySchema:
-        - AttributeName: "customerNumber"
-          KeyType: "HASH"
-      BillingMode: "PAY_PER_REQUEST"
-      TimeToLiveSpecification:
-        AttributeName: "ttl"
-        Enabled: True
-      PointInTimeRecoverySpecification:
-        PointInTimeRecoveryEnabled: True
-      SSESpecification:
-        SSEEnabled: True
+      Location: ./iam/template.yaml
+      Parameters:
+        DialingListBucketArn: !GetAtt StorageStack.Outputs.DialingListBucketArn
+        ResultsBucketArn: !GetAtt StorageStack.Outputs.ResultsBucketArn
+        ActiveDialingTableArn: !GetAtt StorageStack.Outputs.ActiveDialingTableArn
+        LeadCacheTableArn: !GetAtt StorageStack.Outputs.LeadCacheTableArn
+        SupabaseSecretArn: !GetAtt ConfigStack.Outputs.SupabaseSecretArn
 
-  # === SQS Queues ===
-  DialingListQueue:
-    Type: AWS::SQS::Queue
+  MessagingStack:
+    Type: AWS::Serverless::Application
     Properties:
-      QueueName: !Join ['-', [!Ref AWS::StackName,'dialing-queue', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]]]
-      VisibilityTimeout: 30
-      DelaySeconds: 0
-      MessageRetentionPeriod: 1209600
+      Location: ./messaging/template.yaml
+      Parameters:
+        StackName: !Ref AWS::StackName
+        StackId: !Ref AWS::StackId
+        ResultsBucketArn: !GetAtt StorageStack.Outputs.ResultsBucketArn
+        KinesisFirehoseDeliveryRoleArn: !GetAtt IamStack.Outputs.KinesisFirehoseDeliveryRoleArn
 
-  PriorityDialingQueue:
-    Type: AWS::SQS::Queue
+  LambdasStack:
+    Type: AWS::Serverless::Application
     Properties:
-      QueueName: !Join ['-', [!Ref AWS::StackName,'priority-queue', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]]]
-      VisibilityTimeout: 30
-      DelaySeconds: 0
-      MessageRetentionPeriod: 1209600
+      Location: ./lambdas/template.yaml
+      Parameters:
+        SsmBasePath: '/connect/unified-dialer'
+        UnifiedDialerLambdaRoleArn: !GetAtt IamStack.Outputs.UnifiedDialerLambdaRoleArn
+        SupabaseLookupLambdaRoleArn: !GetAtt IamStack.Outputs.SupabaseLookupLambdaRoleArn
+        SupabaseSecretArn: !GetAtt ConfigStack.Outputs.SupabaseSecretArn
+        LeadCacheTable: !GetAtt StorageStack.Outputs.LeadCacheTable
+        ConnectInstanceId: !Ref ConnectInstanceId
+        Region: !Ref AWS::Region
+        AccountId: !Ref AWS::AccountId
 
-  # === Secrets ===
-  SupabaseSecret:
-    Type: AWS::SecretsManager::Secret
+  StateMachineStack:
+    Type: AWS::Serverless::Application
     Properties:
-      Name: !Sub '${AWS::StackName}-supabase-credentials'
-      Description: 'Supabase credentials for unified dialer'
-      SecretString: !Sub |
-        {
-          "url": "${SupabaseUrl}",
-          "anon_key": "${SupabaseAnonKey}"
-        }
-
-  # === IAM Roles ===
-  KinesisFirehoseDeliveryRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - firehose.amazonaws.com
-                - s3.amazonaws.com
-            Action: sts:AssumeRole
-      Path: /
-      Policies:
-        - PolicyName: deliveryToS3
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Sid: deliveryToS3
-                Effect: Allow
-                Action:
-                  - s3:AbortMultipartUpload
-                  - s3:GetBucketLocation
-                  - s3:GetObject
-                  - s3:ListBucket
-                  - s3:ListBucketMultipartUploads
-                  - s3:PutObject
-                Resource: "*"
-
-  UnifiedDialerLambdaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns: 
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaKinesisExecutionRole
-      Policies:
-        - PolicyName: S3Access
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 's3:PutObject'
-                  - 's3:GetObject'
-                  - 's3:DeleteObject'
-                  - 's3:ListBucket'
-                Resource:
-                  - !GetAtt DialingListBucket.Arn
-                  - !Sub '${DialingListBucket.Arn}/*'
-                  - !GetAtt ResultsBucket.Arn
-                  - !Sub '${ResultsBucket.Arn}/*'
-        - PolicyName: DynamoDBAccess
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 'dynamodb:PutItem'
-                  - 'dynamodb:DeleteItem'
-                  - 'dynamodb:GetItem'
-                  - 'dynamodb:Scan'
-                  - 'dynamodb:Query'
-                  - 'dynamodb:UpdateItem'
-                Resource:
-                  - !GetAtt ActiveDialingTable.Arn
-                  - !GetAtt LeadCacheTable.Arn
-        - PolicyName: StepFunctionTaskToken
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 'states:SendTaskSuccess'
-                  - 'states:SendTaskFailure'
-                  - 'states:SendTaskHeartbeat'
-                Resource: '*'
-        - PolicyName: ConnectPermissions
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 'connect:StartOutboundVoiceContact'
-                  - 'connect:DescribeHoursOfOperation'
-                  - 'connect:GetCurrentMetricData'
-                  - 'connect:DescribeQueue'
-                  - 'connect:CreateProfile'
-                  - 'profile:DeleteProfile'
-                  - 'profile:UpdateProfile'
-                  - 'profile:SearchProfiles'
-                  - 'connect:GetContactAttributes'
-                  - 'connect:UpdateContactAttributes'
-                Resource: '*'
-        - PolicyName: ParameterAccess
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 'ssm:GetParametersByPath'
-                  - 'ssm:GetParameter'
-                  - 'ssm:PutParameter'
-                Resource: '*'
-        - PolicyName: DataStreamAccess
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 'firehose:*'
-                  - 'kinesis:*'
-                  - 'sqs:*'
-                Resource: '*'
-        - PolicyName: PinpointAccess
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 'mobiletargeting:GetVoiceTemplate'
-                  - 'mobiletargeting:GetCampaign'
-                  - 'mobiletargeting:GetSegment'
-                  - 'mobiletargeting:PhoneNumberValidate'
-                  - 'mobiletargeting:UpdateCampaign'
-                  - 'mobiletargeting:PutEvents'
-                Resource: '*'
-
-  SupabaseLookupLambdaRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: lambda.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: DynamoDBCacheAccess
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 'dynamodb:PutItem'
-                  - 'dynamodb:GetItem'
-                  - 'dynamodb:UpdateItem'
-                Resource: !GetAtt LeadCacheTable.Arn
-        - PolicyName: SecretsManagerAccess
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - 'secretsmanager:GetSecretValue'
-                Resource: !Ref SupabaseSecret
-
-  # === Lambda Functions ===
-  LookupSupabaseFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Role: !GetAtt SupabaseLookupLambdaRole.Arn
-      CodeUri: ../lambdas/lookupSupabase/
-      Handler: index.handler
-      Runtime: nodejs20.x
-      MemorySize: 256
-      Timeout: 30
-      Environment:
-        Variables:
-          SUPABASE_SECRET_ARN: !Ref SupabaseSecret
-          LEAD_CACHE_TABLE: !Ref LeadCacheTable
+      Location: ./statemachine/template.yaml
+      Parameters:
+        ParameterDialerStatus: !GetAtt DialerStatusParameter.Name
+        GetConfigFunctionArn: !GetAtt LambdasStack.Outputs.PowerDialerGetConfigFunctionArn
+        GetContactsFunctionArn: !GetAtt LambdasStack.Outputs.PowerDialerGetContactsFunctionArn
+        LookupSupabaseFunctionArn: !GetAtt LambdasStack.Outputs.LookupSupabaseFunctionArn
+        DialFunctionArn: !GetAtt LambdasStack.Outputs.PowerDialerDialFunctionArn
+        BlasterGetContactsFunctionArn: !GetAtt LambdasStack.Outputs.BlasterGetContactsFunctionArn
+        BlasterDialFunctionArn: !GetAtt LambdasStack.Outputs.BlasterDialFunctionArn
 
   # === SSM Parameters ===
   ContactSourceParameter:
@@ -365,7 +166,7 @@ Resources:
     Properties: 
       Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'table-activedialing']]
       Type: String
-      Value: !Ref ActiveDialingTable
+      Value: !GetAtt StorageStack.Outputs.ActiveDialingTable
 
   ContactFlowParameter:
     Type: AWS::SSM::Parameter
@@ -379,7 +180,7 @@ Resources:
     Properties: 
       Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'ResultsBucket']]
       Type: String
-      Value: !Ref ResultsBucket
+      Value: !GetAtt StorageStack.Outputs.ResultsBucket
       
   ConnectIdParameter:
     Type: AWS::SSM::Parameter
@@ -443,95 +244,43 @@ Resources:
     Properties:
       Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'supabase-secret']]
       Type: String
-      Value: !Ref SupabaseSecret
+      Value: !GetAtt ConfigStack.Outputs.SupabaseSecretArn
       Description: 'ARN of Supabase credentials secret'
-
-  # === Optional: Pinpoint Application Resources ===
-  # Uncomment these if you want to create Pinpoint applications as part of this stack
-  
-  # PinpointApplication:
-  #   Type: AWS::Pinpoint::App
-  #   Properties:
-  #     Name: !Sub '${AWS::StackName}-voice-campaigns'
-  #     Tags:
-  #       Environment: !Ref Environment
-  #       Company: vistocapital
-  #       Purpose: voice-campaigns
-
-  # PinpointApplicationParameter:
-  #   Type: AWS::SSM::Parameter
-  #   Properties:
-  #     Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'pinpoint-application-id']]
-  #     Type: String
-  #     Value: !Ref PinpointApplication
-  #     Description: 'Pinpoint Application ID for voice campaigns'
-
-  # === Lambda Permissions ===
-  ConnectLambdaPermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      Action: 'lambda:InvokeFunction'
-      FunctionName: !Ref LookupSupabaseFunction
-      Principal: connect.amazonaws.com
-      SourceArn: !Sub 'arn:aws:connect:${AWS::Region}:${AWS::AccountId}:instance/${ConnectInstanceId}/*'
-
-  # TODO: Add this when queueContacts Lambda is implemented
-  # PinpointLambdaPermission:
-  #   Type: AWS::Lambda::Permission
-  #   Properties:
-  #     Action: 'lambda:InvokeFunction'
-  #     FunctionName: !Ref QueueContactsFunction
-  #     Principal: !Sub pinpoint.${AWS::Region}.amazonaws.com
-  #     SourceArn: !Sub 'arn:aws:mobiletargeting:${AWS::Region}:${AWS::AccountId}:apps/*'
-
-  # === Kinesis Firehose ===
-  ResultsFirehose:
-    Type: 'AWS::KinesisFirehose::DeliveryStream'
-    Properties:
-      DeliveryStreamType: DirectPut
-      DeliveryStreamName: !Join ['-', [!Ref AWS::StackName,'results', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]]]
-      S3DestinationConfiguration:
-        BucketARN: !GetAtt ResultsBucket.Arn
-        BufferingHints:
-          IntervalInSeconds: '60'
-          SizeInMBs: '10'
-        CompressionFormat: UNCOMPRESSED
-        RoleARN: !GetAtt KinesisFirehoseDeliveryRole.Arn
 
 Outputs:
   InputBucket:
     Description: "S3 Bucket for uploading contact lists (CSV format)"
-    Value: !Ref DialingListBucket
+    Value: !GetAtt StorageStack.Outputs.DialingListBucket
     Export:
       Name: !Sub "${AWS::StackName}-InputBucket"
 
   OutputBucket:
     Description: "S3 Bucket for campaign results and logs"
-    Value: !Ref ResultsBucket
+    Value: !GetAtt StorageStack.Outputs.ResultsBucket
     Export:
       Name: !Sub "${AWS::StackName}-OutputBucket"
 
   LookupSupabaseFunction:
     Description: "Supabase Lookup Lambda Function ARN for Connect integration"
-    Value: !GetAtt LookupSupabaseFunction.Arn
+    Value: !GetAtt LambdasStack.Outputs.LookupSupabaseFunctionArn
     Export:
       Name: !Sub "${AWS::StackName}-SupabaseLookup"
 
   LeadCacheTable:
     Description: "DynamoDB table for caching lead data"
-    Value: !Ref LeadCacheTable
+    Value: !GetAtt StorageStack.Outputs.LeadCacheTable
     Export:
       Name: !Sub "${AWS::StackName}-LeadCache"
 
   ActiveDialingTable:
     Description: "DynamoDB table for tracking active calls"
-    Value: !Ref ActiveDialingTable
+    Value: !GetAtt StorageStack.Outputs.ActiveDialingTable
     Export:
       Name: !Sub "${AWS::StackName}-ActiveDialing"
 
   SupabaseSecret:
     Description: "Secrets Manager secret containing Supabase credentials"
-    Value: !Ref SupabaseSecret
+    Value: !GetAtt ConfigStack.Outputs.SupabaseSecretArn
     Export:
       Name: !Sub "${AWS::StackName}-SupabaseSecret"
 

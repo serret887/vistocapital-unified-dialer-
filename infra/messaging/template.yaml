@@ -1,0 +1,43 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: "Messaging Resources (SQS, Kinesis) for the Unified Dialer"
+
+Parameters:
+  StackName:
+    Type: String
+  StackId:
+    Type: String
+  ResultsBucketArn:
+    Type: String
+  KinesisFirehoseDeliveryRoleArn:
+    Type: String
+
+Resources:
+  DialingListQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Join ['-', [!Ref StackName,'dialing-queue', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref StackId]]]]]]
+      VisibilityTimeout: 30
+      DelaySeconds: 0
+      MessageRetentionPeriod: 1209600
+
+  PriorityDialingQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Join ['-', [!Ref StackName,'priority-queue', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref StackId]]]]]]
+      VisibilityTimeout: 30
+      DelaySeconds: 0
+      MessageRetentionPeriod: 1209600
+  
+  ResultsFirehose:
+    Type: 'AWS::KinesisFirehose::DeliveryStream'
+    Properties:
+      DeliveryStreamType: DirectPut
+      DeliveryStreamName: !Join ['-', [!Ref StackName,'results', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref StackId]]]]]]
+      S3DestinationConfiguration:
+        BucketARN: !Ref ResultsBucketArn
+        BufferingHints:
+          IntervalInSeconds: '60'
+          SizeInMBs: '10'
+        CompressionFormat: UNCOMPRESSED
+        RoleARN: !Ref KinesisFirehoseDeliveryRoleArn 

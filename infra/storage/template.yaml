@@ -1,0 +1,79 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: "Storage Resources (S3, DynamoDB) for the Unified Dialer"
+
+Parameters:
+  StackName:
+    Type: String
+  StackId:
+    Type: String
+
+Resources:
+  DialingListBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Join ['-', [!Ref StackName,'input-bucket', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref StackId]]]]]]
+      NotificationConfiguration:
+        EventBridgeConfiguration:
+          EventBridgeEnabled: True
+    DeletionPolicy: Delete
+
+  ResultsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Join ['-', [!Ref StackName,'output-bucket', !Select [4, !Split ['-', !Select [2, !Split ['/', !Ref StackId]]]]]]
+    DeletionPolicy: Delete
+
+  ActiveDialingTable:
+    Type: AWS::DynamoDB::Table
+    Properties: 
+      AttributeDefinitions: 
+        - AttributeName: "contactId"
+          AttributeType: "S"
+      KeySchema: 
+        - AttributeName: "contactId"
+          KeyType: "HASH"
+      BillingMode: "PAY_PER_REQUEST"
+      PointInTimeRecoverySpecification: 
+        PointInTimeRecoveryEnabled: True
+      SSESpecification:
+        SSEEnabled: True
+      TimeToLiveSpecification:
+          AttributeName: "TimeToLive"
+          Enabled: True
+
+  LeadCacheTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: "customerNumber"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "customerNumber"
+          KeyType: "HASH"
+      BillingMode: "PAY_PER_REQUEST"
+      TimeToLiveSpecification:
+        AttributeName: "ttl"
+        Enabled: True
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: True
+      SSESpecification:
+        SSEEnabled: True
+
+Outputs:
+  DialingListBucket:
+    Value: !Ref DialingListBucket
+  DialingListBucketArn:
+    Value: !GetAtt DialingListBucket.Arn
+  ResultsBucket:
+    Value: !Ref ResultsBucket
+  ResultsBucketArn:
+    Value: !GetAtt ResultsBucket.Arn
+  ActiveDialingTable:
+    Value: !Ref ActiveDialingTable
+  ActiveDialingTableArn:
+    Value: !GetAtt ActiveDialingTable.Arn
+  LeadCacheTable:
+    Value: !Ref LeadCacheTable
+  LeadCacheTableArn:
+    Value: !GetAtt LeadCacheTable.Arn 

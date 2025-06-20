@@ -1,0 +1,89 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: "State Machine Resources for the Unified Dialer"
+
+Parameters:
+  ParameterDialerStatus:
+    Type: String
+  GetConfigFunctionArn:
+    Type: String
+  GetContactsFunctionArn:
+    Type: String
+  LookupSupabaseFunctionArn:
+    Type: String
+  DialFunctionArn:
+    Type: String
+  BlasterGetContactsFunctionArn:
+    Type: String
+  BlasterDialFunctionArn:
+    Type: String
+
+Resources:
+  UnifiedDialerStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub "${AWS::StackName}-UnifiedDialerControl"
+      RoleArn: !GetAtt StateMachineRole.Arn
+      DefinitionUri: ../../statemachine/unified-dialer-control.asl.json
+      DefinitionSubstitutions:
+        ParameterDialerStatus: !Ref ParameterDialerStatus
+        GetConfigFunctionArn: !Ref GetConfigFunctionArn
+        GetContactsFunctionArn: !Ref GetContactsFunctionArn
+        LookupSupabaseFunctionArn: !Ref LookupSupabaseFunctionArn
+        DialFunctionArn: !Ref DialFunctionArn
+        BlasterGetContactsFunctionArn: !Ref BlasterGetContactsFunctionArn
+        BlasterDialFunctionArn: !Ref BlasterDialFunctionArn
+
+  StateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: 'Allow'
+          Principal:
+            Service:
+            - !Sub 'states.${AWS::Region}.amazonaws.com'
+          Action: 'sts:AssumeRole'
+      Path: '/'
+      Policies:
+      - PolicyName: LambdaInvokePolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - 'lambda:InvokeFunction'
+            Resource: 
+              - !Ref GetConfigFunctionArn
+              - !Ref GetContactsFunctionArn
+              - !Ref LookupSupabaseFunctionArn
+              - !Ref DialFunctionArn
+              - !Ref BlasterGetContactsFunctionArn
+              - !Ref BlasterDialFunctionArn
+      - PolicyName: SsmParameterPolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - 'ssm:getParameter'
+            - 'ssm:putParameter'
+            Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParameterDialerStatus}'
+      - PolicyName: XRayPolicy
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - "xray:PutTraceSegments"
+                - "xray:PutTelemetryRecords"
+                - "xray:GetSamplingRules"
+                - "xray:GetSamplingTargets"
+                - "xray:GetSamplingStatisticSummaries"
+              Resource: "*"
+
+Outputs:
+  StateMachineArn:
+    Description: "ARN for the Unified Dialer State Machine"
+    Value: !Ref UnifiedDialerStateMachine 
