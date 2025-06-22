@@ -42,6 +42,8 @@ Resources:
       CodeUri: ../../lambdas/PowerDialer-getConfig/
       Handler: lambda_function.lambda_handler
       Runtime: python3.9
+      Layers:
+        - !Ref PowerDialerLayer
       Environment:
         Variables:
           SSM_BASE_PATH: !Ref SsmBasePath
@@ -324,53 +326,28 @@ Resources:
   ConnectLambdaPermission:
     Type: AWS::Lambda::Permission
     Properties:
-      Action: 'lambda:InvokeFunction'
       FunctionName: !GetAtt LookupSupabaseFunction.Arn
+      Action: lambda:InvokeFunction
       Principal: connect.amazonaws.com
-      SourceArn: !Sub 'arn:aws:connect:${Region}:${AccountId}:instance/${ConnectInstanceId}/*'
+      SourceAccount: !Ref AccountId
+      SourceArn: !Sub "arn:aws:connect:${Region}:${AccountId}:instance/${ConnectInstanceId}"
 
 Outputs:
   LookupSupabaseFunctionArn:
-    Description: "Supabase Lookup Lambda Function ARN for Connect integration"
+    Description: "ARN of the Supabase lookup Lambda function"
     Value: !GetAtt LookupSupabaseFunction.Arn
-
   PowerDialerGetConfigFunctionArn:
-    Description: "PowerDialer GetConfig Lambda Function ARN"
+    Description: "ARN of the PowerDialer getConfig function"
     Value: !GetAtt PowerDialerGetConfigFunction.Arn
-
-  BlasterConnectStatusFunctionArn:
-    Value: !GetAtt BlasterConnectStatusFunction.Arn
-  BlasterDialFunctionArn:
-    Value: !GetAtt BlasterDialFunction.Arn
-  BlasterGetConfigFunctionArn:
-    Value: !GetAtt BlasterGetConfigFunction.Arn
-  BlasterGetContactsFunctionArn:
-    Value: !GetAtt BlasterGetContactsFunction.Arn
-  BlasterListLoadFunctionArn:
-    Value: !GetAtt BlasterListLoadFunction.Arn
-  BlasterProcessContactEventsFunctionArn:
-    Value: !GetAtt BlasterProcessContactEventsFunction.Arn
-  BlasterQueueContactsFunctionArn:
-    Value: !GetAtt BlasterQueueContactsFunction.Arn
-  BlasterSetDispositionFunctionArn:
-    Value: !GetAtt BlasterSetDispositionFunction.Arn
-  PowerDialerConnectStatusFunctionArn:
-    Value: !GetAtt PowerDialerConnectStatusFunction.Arn
-  PowerDialerDialFunctionArn:
-    Value: !GetAtt PowerDialerDialFunction.Arn
-  PowerDialerGetAvailAgentsFunctionArn:
-    Value: !GetAtt PowerDialerGetAvailAgentsFunction.Arn
   PowerDialerGetContactsFunctionArn:
+    Description: "ARN of the PowerDialer getContacts function"
     Value: !GetAtt PowerDialerGetContactsFunction.Arn
-  PowerDialerListLoadFunctionArn:
-    Value: !GetAtt PowerDialerListLoadFunction.Arn
-  PowerDialerProcessContactEventsFunctionArn:
-    Value: !GetAtt PowerDialerProcessContactEventsFunction.Arn
-  PowerDialerQueueContactsFunctionArn:
-    Value: !GetAtt PowerDialerQueueContactsFunction.Arn
-  PowerDialerSaveResultsFunctionArn:
-    Value: !GetAtt PowerDialerSaveResultsFunction.Arn
-  PowerDialerSetDispositionFunctionArn:
-    Value: !GetAtt PowerDialerSetDispositionFunction.Arn
-  PowerDialerUpdateProfileFunctionArn:
-    Value: !GetAtt PowerDialerUpdateProfileFunction.Arn 
+  PowerDialerDialFunctionArn:
+    Description: "ARN of the PowerDialer dial function"
+    Value: !GetAtt PowerDialerDialFunction.Arn
+  BlasterGetContactsFunctionArn:
+    Description: "ARN of the Blaster getContacts function"
+    Value: !GetAtt BlasterGetContactsFunction.Arn
+  BlasterDialFunctionArn:
+    Description: "ARN of the Blaster dial function"
+    Value: !GetAtt BlasterDialFunction.Arn 

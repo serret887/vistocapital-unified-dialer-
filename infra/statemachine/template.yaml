@@ -24,7 +24,7 @@ Resources:
     Properties:
       StateMachineName: !Sub "${AWS::StackName}-UnifiedDialerControl"
       RoleArn: !GetAtt StateMachineRole.Arn
-      DefinitionUri: ../../statemachine/unified-dialer-control.asl.json
+      DefinitionUri: ./unified-dialer-control.asl.json
       DefinitionSubstitutions:
         ParameterDialerStatus: !Ref ParameterDialerStatus
         GetConfigFunctionArn: !Ref GetConfigFunctionArn
@@ -55,12 +55,7 @@ Resources:
             Action:
             - 'lambda:InvokeFunction'
             Resource: 
-              - !Ref GetConfigFunctionArn
-              - !Ref GetContactsFunctionArn
-              - !Ref LookupSupabaseFunctionArn
-              - !Ref DialFunctionArn
-              - !Ref BlasterGetContactsFunctionArn
-              - !Ref BlasterDialFunctionArn
+              - !Sub 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${AWS::StackName}-*'
       - PolicyName: SsmParameterPolicy
         PolicyDocument:
           Version: '2012-10-17'
@@ -69,7 +64,7 @@ Resources:
             Action:
             - 'ssm:getParameter'
             - 'ssm:putParameter'
-            Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParameterDialerStatus}'
+            Resource: !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${ParameterDialerStatus}/*'
       - PolicyName: XRayPolicy
         PolicyDocument:
           Version: '2012-10-17'
