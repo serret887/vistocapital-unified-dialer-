@@ -1,55 +1,41 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
-Description: Unified Omnichannel Dialer for Amazon Connect - Root Stack
-
-Globals:
-  Function:
-    Timeout: 60
-    MemorySize: 128
-    Runtime: python3.9
+Description: >
+  Root stack for ViSto Capital Unified Dialer. Deploys nested stacks for IAM, 
+  Storage, Messaging, Lambdas, and Step Functions.
 
 Parameters:
-  ConnectInstanceId:
+  Environment:
     Type: String
-    AllowedPattern: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-    Description: Amazon Connect Instance ID to use for outbound calls
+    Default: dev
+    Description: The deployment environment (e.g., dev, staging, prod)
   ConnectContactFlowId:
     Type: String
-    AllowedPattern: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-    Description: Amazon Connect Contact Flow ID to use for outbound calls
+    Description: "ID of the Amazon Connect contact flow"
   ConnectQueueId:
     Type: String
-    AllowedPattern: "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-    Description: Amazon Connect Queue ID to use for outbound calls
+    Description: "ID of the Amazon Connect queue"
   ValidateProfile:
     Type: String
-    Default: 'True'
-    AllowedValues: ["True", "False"]
-    Description: Determines whether the function will validate the profile exists or not
+    Description: "Enable/Disable Customer Profiles validation"
   CustomerProfilesDomainName:
     Type: String
-    Description: Amazon Connect Customer Profiles Domain Name
+    Description: "Amazon Connect Customer Profiles domain name"
   CountryCode:
-    Type: Number
-    Default: 1
-    Description: Country code of destination country
+    Type: String
+    Description: "Country code for dialing"
   ISOCountryCode:
     Type: String
-    Default: US
-    MaxLength: 2
-    Description: 2 letter code for country code
+    Description: "ISO country code for Amazon Connect"
   ConcurrentCalls:
-    Type: Number
-    Default: 5
-    Description: Number of calls to be called simultaneously
+    Type: String
+    Description: "Number of concurrent calls"
   CallTimeOut:
-    Type: Number
-    Default: 3600
-    Description: Timeout in seconds for each call
+    Type: String
+    Description: "Call timeout in seconds"
   NoCallStatusList:
-    Type: CommaDelimitedList
-    Default: No Interest,Do Not Call,Previous Renewal
-    Description: Status list for which no call will be made
+    Type: String
+    Description: "List of no-call statuses"
   SupabaseUrl:
     Type: String
     Description: Supabase project URL (e.g., https://your-project.supabase.co)
@@ -57,11 +43,6 @@ Parameters:
     Type: String
     NoEcho: true
     Description: Supabase anonymous key for API access
-  Environment:
-    Type: String
-    Default: 'prod'
-    AllowedValues: ['dev', 'staging', 'prod']
-    Description: 'Environment designation for resource tagging'
 
 Resources:
   ConnectInstance:
@@ -90,206 +71,92 @@ Resources:
         SupabaseUrl: !Ref SupabaseUrl
         SupabaseAnonKey: !Ref SupabaseAnonKey
   
-  # IamStack:
-  #   Type: AWS::Serverless::Application
-  #   Properties:
-  #     Location: ./iam/template.yaml
-  #     Parameters:
-  #       DialingListBucketArn: !GetAtt StorageStack.Outputs.DialingListBucketArn
-  #       ResultsBucketArn: !GetAtt StorageStack.Outputs.ResultsBucketArn
-  #       ActiveDialingTableArn: !GetAtt StorageStack.Outputs.ActiveDialingTableArn
-  #       LeadCacheTableArn: !GetAtt StorageStack.Outputs.LeadCacheTableArn
-  #       SupabaseSecretArn: !GetAtt ConfigStack.Outputs.SupabaseSecretArn
+  IamStack:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location: ./iam/template.yaml
+      Parameters:
+        DialingListBucketArn: !GetAtt StorageStack.Outputs.DialingListBucketArn
+        ResultsBucketArn: !GetAtt StorageStack.Outputs.ResultsBucketArn
+        ActiveDialingTableArn: !GetAtt StorageStack.Outputs.ActiveDialingTableArn
+        LeadCacheTableArn: !GetAtt StorageStack.Outputs.LeadCacheTableArn
+        SupabaseSecretArn: !GetAtt ConfigStack.Outputs.SupabaseSecretArn
 
-  # MessagingStack:
-  #   Type: AWS::Serverless::Application
-  #   Properties:
-  #     Location: ./messaging/template.yaml
-  #     Parameters:
-  #       StackName: !Ref AWS::StackName
-  #       StackId: !Ref AWS::StackId
-  #       ResultsBucketArn: !GetAtt StorageStack.Outputs.ResultsBucketArn
-  #       KinesisFirehoseDeliveryRoleArn: !GetAtt IamStack.Outputs.KinesisFirehoseDeliveryRoleArn
+  MessagingStack:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location: ./messaging/template.yaml
+      Parameters:
+        StackName: !Ref AWS::StackName
+        StackId: !Ref AWS::StackId
+        ResultsBucketArn: !GetAtt StorageStack.Outputs.ResultsBucketArn
+        KinesisFirehoseDeliveryRoleArn: !GetAtt IamStack.Outputs.KinesisFirehoseDeliveryRoleArn
 
-  # LambdasStack:
-  #   Type: AWS::Serverless::Application
-  #   Properties:
-  #     Location: ./lambdas/template.yaml
-  #     Parameters:
-  #       SsmBasePath: '/connect/unified-dialer'
-  #       UnifiedDialerLambdaRoleArn: !GetAtt IamStack.Outputs.UnifiedDialerLambdaRoleArn
-  #       SupabaseLookupLambdaRoleArn: !GetAtt IamStack.Outputs.SupabaseLookupLambdaRoleArn
-  #       SupabaseSecretArn: !GetAtt ConfigStack.Outputs.SupabaseSecretArn
-  #       LeadCacheTable: !GetAtt StorageStack.Outputs.LeadCacheTable
-  #       ConnectInstanceId: !GetAtt ConnectInstance.Id
-  #       Region: !Ref AWS::Region
-  #       AccountId: !Ref AWS::AccountId
-
-  # StateMachineStack:
-  #   Type: AWS::Serverless::Application
-  #   Properties:
-  #     Location: ./statemachine/template.yaml
-  #     Parameters:
-  #       ParameterDialerStatus: !GetAtt DialerStatusParameter.Name
-  #       GetConfigFunctionArn: !GetAtt LambdasStack.Outputs.PowerDialerGetConfigFunctionArn
-  #       GetContactsFunctionArn: !GetAtt LambdasStack.Outputs.PowerDialerGetContactsFunctionArn
-  #       LookupSupabaseFunctionArn: !GetAtt LambdasStack.Outputs.LookupSupabaseFunctionArn
-  #       DialFunctionArn: !GetAtt LambdasStack.Outputs.PowerDialerDialFunctionArn
-  #       BlasterGetContactsFunctionArn: !GetAtt LambdasStack.Outputs.BlasterGetContactsFunctionArn
-  #       BlasterDialFunctionArn: !GetAtt LambdasStack.Outputs.BlasterDialFunctionArn
-
-  # === SSM Parameters ===
-  # ContactSourceParameter:
-  #   Type: AWS::SSM::Parameter
-  #   Properties: 
-  #     Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'contact-source']]
-  #     Type: String
-  #     Value: 's3'
-  
-  # DialIndexParameter:
-  #   Type: AWS::SSM::Parameter
-  #   Properties: 
-  #     Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'dialIndex']]
-  #     Type: String
-  #     Value: '0'
+  LambdasStack:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location: ./lambdas/template.yaml
+      Parameters:
+        SsmBasePath: '/connect/unified-dialer'
+        UnifiedDialerLambdaRoleArn: !GetAtt IamStack.Outputs.UnifiedDialerLambdaRoleArn
+        SupabaseLookupLambdaRoleArn: !GetAtt IamStack.Outputs.SupabaseLookupLambdaRoleArn
+        SupabaseSecretArn: !GetAtt ConfigStack.Outputs.SupabaseSecretArn
+        LeadCacheTable: !GetAtt StorageStack.Outputs.LeadCacheTable
+        ConnectInstanceId: !GetAtt ConnectInstance.Id
+        Region: !Ref AWS::Region
+        AccountId: !Ref AWS::AccountId
   
   DialerStatusParameter:
     Type: AWS::SSM::Parameter
     Properties: 
-      Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'activeDialer']]
+      Name: !Sub "/connect/unified-dialer/${AWS::StackName}/activeDialer"
       Type: String
       Value: 'False'  
 
-  # TotalRecordsParameter:
-  #   Type: AWS::SSM::Parameter
-  #   Properties: 
-  #     Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'totalRecords']]
-  #     Type: String
-  #     Value: '0'
-  
-  # ActiveDialingTableParameter:
-  #   Type: AWS::SSM::Parameter
-  #   Properties: 
-  #     Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'table-activedialing']]
-  #     Type: String
-  #     Value: !GetAtt StorageStack.Outputs.ActiveDialingTable
+  StateMachineStack:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location: ./statemachine/template.yaml
+      Parameters:
+        ParameterDialerStatus: !Ref DialerStatusParameter
+        GetConfigFunctionArn: !GetAtt LambdasStack.Outputs.PowerDialerGetConfigFunctionArn
+        GetContactsFunctionArn: !GetAtt LambdasStack.Outputs.PowerDialerGetContactsFunctionArn
+        LookupSupabaseFunctionArn: !GetAtt LambdasStack.Outputs.LookupSupabaseFunctionArn
+        DialFunctionArn: !GetAtt LambdasStack.Outputs.PowerDialerDialFunctionArn
+        BlasterGetContactsFunctionArn: !GetAtt LambdasStack.Outputs.BlasterGetContactsFunctionArn
+        BlasterDialFunctionArn: !GetAtt LambdasStack.Outputs.BlasterDialFunctionArn
 
-  # ContactFlowParameter:
-  #   Type: AWS::SSM::Parameter
-  #   Properties: 
-  #     Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'contactflow']]
-  #     Type: String
-  #     Value: !Ref ConnectContactFlowId
-
-  # OutputBucketParameter:
-  #   Type: AWS::SSM::Parameter
-  #   Properties: 
-  #     Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'ResultsBucket']]
-  #     Type: String
-  #     Value: !GetAtt StorageStack.Outputs.ResultsBucket
-      
-  # ConnectIdParameter:
-  #   Type: AWS::SSM::Parameter
-  #   Properties: 
-  #     Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'connectid']]
-  #     Type: String
-  #     Value: !Ref ConnectInstanceId
-
-  # QueueParameter:
-  #   Type: AWS::SSM::Parameter
-  #   Properties: 
-  #     Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'queue']]
-  #     Type: String
-  #     Value: !Ref ConnectQueueId
-
-  # CountryCodeParameter:
-  #   Type: AWS::SSM::Parameter
-  #   Properties: 
-  #     Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'countrycode']]
-  #     Type: String
-  #     Value: !Ref CountryCode
-
-  # ISOCountryCodeParameter:
-  #   Type: AWS::SSM::Parameter
-  #   Properties: 
-  #     Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'isocountrycode']]
-  #     Type: String
-  #     Value: !Ref ISOCountryCode
-
-  # ConcurrentCallsParameter:
-  #   Type: AWS::SSM::Parameter
-  #   Properties: 
-  #     Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'concurrentCalls']]
-  #     Type: String
-  #     Value: !Ref ConcurrentCalls
-
-  # TimeOutParameter:
-  #   Type: AWS::SSM::Parameter
-  #   Properties:
-  #     Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'timeOut']]
-  #     Type: String
-  #     Value: !Ref CallTimeOut
-
-  # ConcurrencyChangeParameter:
-  #   Type: AWS::SSM::Parameter
-  #   Properties: 
-  #     Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'concurrencyChange']]
-  #     Type: String
-  #     Value: 'False'
-
-  # CampaignModeParameter:
-  #   Type: AWS::SSM::Parameter
-  #   Properties: 
-  #     Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'campaignMode']]
-  #     Type: String
-  #     Value: 'power-dialer'
-  #     Description: 'Campaign mode: power-dialer or blaster'
-
-  # SupabaseConfigParameter:
-  #   Type: AWS::SSM::Parameter
-  #   Properties:
-  #     Name: !Join ['/', ['/connect/unified-dialer', !Ref AWS::StackName,'supabase-secret']]
-  #     Type: String
-  #     Value: !GetAtt ConfigStack.Outputs.SupabaseSecretArn
-  #     Description: 'ARN of Supabase credentials secret'
-
-# Outputs:
-#   InputBucket:
-#     Description: "S3 Bucket for uploading contact lists (CSV format)"
-#     Value: !GetAtt StorageStack.Outputs.DialingListBucket
-#   OutputBucket:
-#     Description: "S3 Bucket for storing call results and recordings"
-#     Value: !GetAtt StorageStack.Outputs.ResultsBucket
-#   ActiveDialingTable:
-#     Description: "DynamoDB table for tracking active dialing campaigns"
-#     Value: !GetAtt StorageStack.Outputs.ActiveDialingTable
-#   LeadCacheTable:
-#     Description: "DynamoDB table for caching lead information"
-#     Value: !GetAtt StorageStack.Outputs.LeadCacheTable
-#   CampaignsTable:
-#     Description: "DynamoDB table for storing campaign configurations"
-#     Value: !GetAtt StorageStack.Outputs.CampaignsTable
-#   SupabaseLookupLambdaArn:
-#     Description: "ARN of the Supabase lookup Lambda function"
-#     Value: !GetAtt LambdasStack.Outputs.LookupSupabaseFunctionArn
-#     Export:
-#       Name: !Sub "${AWS::StackName}-SupabaseLookupLambdaArn"
-#   UnifiedDialerStateMachineArn:
-#     Description: "ARN of the Unified Dialer State Machine"
-#     Value: !GetAtt StateMachineStack.Outputs.UnifiedDialerStateMachineArn
-#     Export:
-#       Name: !Sub "${AWS::StackName}-UnifiedDialerStateMachineArn" 
-
-  ConnectInstanceId:
-    Description: "The ID of the Amazon Connect instance"
-    Value: !GetAtt ConnectInstance.Id
+Outputs:
+    UnifiedDialerStateMachineArn:
+        Description: "The ARN of the Unified Dialer State Machine"
+        Value: !GetAtt StateMachineStack.Outputs.UnifiedDialerStateMachine
     Export:
-      Name: !Sub "${AWS::StackName}-ConnectInstanceId"
-  ConnectInstanceArn:
-    Description: "The ARN of the Amazon Connect instance"
-    Value: !GetAtt ConnectInstance.Arn
+            Name: !Sub "${AWS::StackName}-UnifiedDialerStateMachineArn"
+    ResultsBucket:
+        Description: "S3 Bucket for storing call results and recordings"
+        Value: !GetAtt StorageStack.Outputs.ResultsBucket
+    ConnectInstanceId:
+        Description: "The ID of the Amazon Connect instance"
+        Value: !GetAtt ConnectInstance.Id
     Export:
-      Name: !Sub "${AWS::StackName}-ConnectInstanceArn"
-  ActiveDialingTable:
-    Description: "DynamoDB table for tracking active dialing campaigns"
-    Value: !GetAtt StorageStack.Outputs.ActiveDialingTable 
+            Name: !Sub "${AWS::StackName}-ConnectInstanceId"
+    ConnectInstanceArn:
+        Description: "The ARN of the Amazon Connect instance"
+        Value: !GetAtt ConnectInstance.Arn
+    Export:
+            Name: !Sub "${AWS::StackName}-ConnectInstanceArn"
+    ActiveDialingTable:
+        Description: "DynamoDB table for tracking active dialing campaigns"
+        Value: !GetAtt StorageStack.Outputs.ActiveDialingTable
+  LeadCacheTable:
+    Description: "DynamoDB table for caching lead data"
+        Value: !GetAtt StorageStack.Outputs.LeadCacheTable
+    DialingListBucket:
+        Description: "S3 Bucket for uploading dialing lists"
+        Value: !GetAtt StorageStack.Outputs.DialingListBucket
+    PowerDialerGetConfigFunctionArn:
+        Description: "ARN for PowerDialer-getConfig Lambda function"
+        Value: !GetAtt LambdasStack.Outputs.PowerDialerGetConfigFunctionArn
+    BlasterGetConfigFunctionArn:
+        Description: "ARN for Blaster-getConfig Lambda function"
+        Value: !GetAtt LambdasStack.Outputs.BlasterGetConfigFunctionArn 
