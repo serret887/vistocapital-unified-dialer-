@@ -29,12 +29,14 @@ error() {
 }
 
 # --- Main Script ---
+echo "Running in $ROOT_DIR"
 
 # 1. Load Environment Variables
 if [ -f "$ENV_FILE" ]; then
     info "Sourcing environment variables from $ENV_FILE"
-    # shellcheck source=/dev/null
-    export "$(grep -v '^#' "$ENV_FILE" | xargs)"
+    set -a
+    source "$ENV_FILE"
+    set +a
 else
     error "Root .env file not found. Please create it and add required variables."
     exit 1

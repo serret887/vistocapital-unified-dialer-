@@ -25,7 +25,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !Ref SupabaseLookupLambdaRoleArn
-      CodeUri: ../../lambdas/lookupSupabase/
+      CodeUri: ../lambdas/lookupSupabase/
       Handler: index.handler
       Runtime: nodejs20.x
       MemorySize: 256
@@ -39,7 +39,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !Ref UnifiedDialerLambdaRoleArn
-      CodeUri: ../../lambdas/PowerDialer-getConfig/
+      CodeUri: ../lambdas/PowerDialer-getConfig/
       Handler: lambda_function.lambda_handler
       Runtime: python3.9
       Layers:
@@ -54,7 +54,7 @@ Resources:
     Properties:
       LayerName: !Sub "${AWS::StackName}-PowerDialerLayer"
       Description: "PowerDialer common functions"
-      ContentUri: ../../lambdas/PowerDialer-layer/
+      ContentUri: ../lambdas/PowerDialer-layer/
       CompatibleRuntimes:
         - python3.9
       LicenseInfo: 'MIT'
@@ -65,7 +65,7 @@ Resources:
     Properties:
       LayerName: !Sub "${AWS::StackName}-BlasterLayer"
       Description: "Blaster common functions"
-      ContentUri: ../../lambdas/Blaster-layer/
+      ContentUri: ../lambdas/Blaster-layer/
       CompatibleRuntimes:
         - python3.9
       LicenseInfo: 'MIT'
@@ -75,7 +75,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !Ref UnifiedDialerLambdaRoleArn
-      CodeUri: ../../lambdas/Blaster-connectStatus/
+      CodeUri: ../lambdas/Blaster-connectStatus/
       Handler: lambda_function.lambda_handler
       Runtime: python3.9
       Layers:
@@ -89,7 +89,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !Ref UnifiedDialerLambdaRoleArn
-      CodeUri: ../../lambdas/Blaster-dial/
+      CodeUri: ../lambdas/Blaster-dial/
       Handler: lambda_function.lambda_handler
       Runtime: python3.9
       Layers:
@@ -103,7 +103,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !Ref UnifiedDialerLambdaRoleArn
-      CodeUri: ../../lambdas/Blaster-getConfig/
+      CodeUri: ../lambdas/Blaster-getConfig/
       Handler: lambda_function.lambda_handler
       Runtime: python3.9
       Layers:
@@ -117,7 +117,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !Ref UnifiedDialerLambdaRoleArn
-      CodeUri: ../../lambdas/Blaster-getContacts/
+      CodeUri: ../lambdas/Blaster-getContacts/
       Handler: lambda_function.lambda_handler
       Runtime: python3.9
       Layers:
@@ -131,7 +131,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !Ref UnifiedDialerLambdaRoleArn
-      CodeUri: ../../lambdas/Blaster-ListLoad/
+      CodeUri: ../lambdas/Blaster-ListLoad/
       Handler: lambda_function.lambda_handler
       Runtime: python3.9
       Layers:
@@ -145,7 +145,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !Ref UnifiedDialerLambdaRoleArn
-      CodeUri: ../../lambdas/Blaster-ProcessContactEvents/
+      CodeUri: ../lambdas/Blaster-ProcessContactEvents/
       Handler: lambda_function.lambda_handler
       Runtime: python3.9
       Layers:
@@ -159,7 +159,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !Ref UnifiedDialerLambdaRoleArn
-      CodeUri: ../../lambdas/Blaster-queueContacts/
+      CodeUri: ../lambdas/Blaster-queueContacts/
       Handler: lambda_function.lambda_handler
       Runtime: python3.9
       Layers:
@@ -173,7 +173,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !Ref UnifiedDialerLambdaRoleArn
-      CodeUri: ../../lambdas/Blaster-setDisposition/
+      CodeUri: ../lambdas/Blaster-setDisposition/
       Handler: lambda_function.lambda_handler
       Runtime: python3.9
       Layers:
@@ -187,7 +187,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !Ref UnifiedDialerLambdaRoleArn
-      CodeUri: ../../lambdas/PowerDialer-connectStatus/
+      CodeUri: ../lambdas/PowerDialer-connectStatus/
       Handler: lambda_function.lambda_handler
       Runtime: python3.9
       Layers:
@@ -201,7 +201,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !Ref UnifiedDialerLambdaRoleArn
-      CodeUri: ../../lambdas/PowerDialer-dial/
+      CodeUri: ../lambdas/PowerDialer-dial/
       Handler: lambda_function.lambda_handler
       Runtime: python3.9
       Layers:
@@ -215,7 +215,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !Ref UnifiedDialerLambdaRoleArn
-      CodeUri: ../../lambdas/PowerDialer-getAvailAgents/
+      CodeUri: ../lambdas/PowerDialer-getAvailAgents/
       Handler: lambda_function.lambda_handler
       Runtime: python3.9
       Layers:
@@ -229,7 +229,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !Ref UnifiedDialerLambdaRoleArn
-      CodeUri: ../../lambdas/PowerDialer-getContacts/
+      CodeUri: ../lambdas/PowerDialer-getContacts/
       Handler: lambda_function.lambda_handler
       Runtime: python3.9
       Layers:
@@ -243,7 +243,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !Ref UnifiedDialerLambdaRoleArn
-      CodeUri: ../../lambdas/PowerDialer-ListLoad/
+      CodeUri: ../lambdas/PowerDialer-ListLoad/
       Handler: lambda_function.lambda_handler
       Runtime: python3.9
       Layers:
@@ -257,7 +257,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !Ref UnifiedDialerLambdaRoleArn
-      CodeUri: ../../lambdas/PowerDialer-ProcessContactEvents/
+      CodeUri: ../lambdas/PowerDialer-ProcessContactEvents/
       Handler: lambda_function.lambda_handler
       Runtime: python3.9
       Layers:
@@ -271,7 +271,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !Ref UnifiedDialerLambdaRoleArn
-      CodeUri: ../../lambdas/PowerDialer-queueContacts/
+      CodeUri: ../lambdas/PowerDialer-queueContacts/
       Handler: lambda_function.lambda_handler
       Runtime: python3.9
       Layers:
@@ -285,7 +285,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !Ref UnifiedDialerLambdaRoleArn
-      CodeUri: ../../lambdas/PowerDialer-SaveResults/
+      CodeUri: ../lambdas/PowerDialer-SaveResults/
       Handler: lambda_function.lambda_handler
       Runtime: python3.9
       Layers:
@@ -299,7 +299,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !Ref UnifiedDialerLambdaRoleArn
-      CodeUri: ../../lambdas/PowerDialer-setDisposition/
+      CodeUri: ../lambdas/PowerDialer-setDisposition/
       Handler: lambda_function.lambda_handler
       Runtime: python3.9
       Layers:
@@ -313,7 +313,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Role: !Ref UnifiedDialerLambdaRoleArn
-      CodeUri: ../../lambdas/PowerDialer-updateProfile/
+      CodeUri: ../lambdas/PowerDialer-updateProfile/
       Handler: lambda_function.lambda_handler
       Runtime: python3.9
       Layers:

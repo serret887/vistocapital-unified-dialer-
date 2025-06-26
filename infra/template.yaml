@@ -130,7 +130,7 @@ Outputs:
     UnifiedDialerStateMachineArn:
         Description: "The ARN of the Unified Dialer State Machine"
         Value: !GetAtt StateMachineStack.Outputs.UnifiedDialerStateMachine
-    Export:
+        Export:
             Name: !Sub "${AWS::StackName}-UnifiedDialerStateMachineArn"
     ResultsBucket:
         Description: "S3 Bucket for storing call results and recordings"
@@ -138,18 +138,18 @@ Outputs:
     ConnectInstanceId:
         Description: "The ID of the Amazon Connect instance"
         Value: !GetAtt ConnectInstance.Id
-    Export:
+        Export:
             Name: !Sub "${AWS::StackName}-ConnectInstanceId"
     ConnectInstanceArn:
         Description: "The ARN of the Amazon Connect instance"
         Value: !GetAtt ConnectInstance.Arn
-    Export:
+        Export:
             Name: !Sub "${AWS::StackName}-ConnectInstanceArn"
     ActiveDialingTable:
         Description: "DynamoDB table for tracking active dialing campaigns"
         Value: !GetAtt StorageStack.Outputs.ActiveDialingTable
-  LeadCacheTable:
-    Description: "DynamoDB table for caching lead data"
+    LeadCacheTable:
+        Description: "DynamoDB table for caching lead data"
         Value: !GetAtt StorageStack.Outputs.LeadCacheTable
     DialingListBucket:
         Description: "S3 Bucket for uploading dialing lists"
