@@ -4,6 +4,7 @@ import { AwsCustomResource, AwsCustomResourcePolicy, PhysicalResourceId } from '
 import { Construct } from 'constructs';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as iam from 'aws-cdk-lib/aws-iam';
 
 interface ConnectAutomationStackProps extends cdk.StackProps {
   environment: string;
@@ -24,7 +25,8 @@ export class ConnectAutomationStack extends cdk.Stack {
     const envConfig = this.getEnvironmentConfig(props.environment);
 
     // 1. Create/Import Contact Flow
-    const contactFlow = this.createContactFlow(connectInstanceId.valueAsString, envConfig);
+    // Commented out UnifiedDialerContactFlow custom resource as contact flow will be managed manually
+    // const unifiedDialerContactFlow = this.createContactFlow(connectInstanceId.valueAsString, envConfig);
 
     // 2. Create Spanish and English Queues
     const queues = this.createLanguageQueues(connectInstanceId.valueAsString, envConfig);
@@ -37,14 +39,14 @@ export class ConnectAutomationStack extends cdk.Stack {
     );
 
     // 4. Associate Lambda Functions (when available)
-    this.associateLambdaFunctions(connectInstanceId.valueAsString, envConfig);
+    // this.associateLambdaFunctions(connectInstanceId.valueAsString, envConfig);
 
     // Outputs
-    new cdk.CfnOutput(this, 'ContactFlowId', {
-      value: contactFlow.getResponseField('ContactFlowId'),
-      description: 'Unified Dialer Contact Flow ID',
-      exportName: `${props.stackName}-ContactFlowId`,
-    });
+    // new cdk.CfnOutput(this, 'ContactFlowId', {
+    //   value: unifiedDialerContactFlow.getResponseField('ContactFlowId'),
+    //   description: 'Unified Dialer Contact Flow ID',
+    //   exportName: `${props.stackName}-ContactFlowId`,
+    // });
 
     new cdk.CfnOutput(this, 'SpanishQueueId', {
       value: queues.spanish.getResponseField('QueueId'),
@@ -112,49 +114,37 @@ export class ConnectAutomationStack extends cdk.Stack {
       });
     }
 
-    return new AwsCustomResource(this, 'UnifiedDialerContactFlow', {
-      onCreate: {
-        service: 'Connect',
-        action: 'createContactFlow',
-        parameters: {
-          InstanceId: instanceId,
-          Name: 'UnifiedDialerContactFlow',
-          Type: 'CONTACT_FLOW',
-          Description: 'Automated contact flow for ViSto Capital unified dialer with Supabase integration',
-          Content: contactFlowContent,
-          Tags: {
-            Environment: this.node.tryGetContext('environment') || 'dev',
-            Project: 'ViStoCapital-UnifiedDialer',
-            Component: 'ContactFlow'
-          }
-        },
-        physicalResourceId: PhysicalResourceId.fromResponse('ContactFlowId'),
-      },
-      onUpdate: {
-        service: 'Connect',
-        action: 'updateContactFlowContent',
-        parameters: {
-          InstanceId: instanceId,
-          ContactFlowId: new cdk.CfnCustomResource(this, 'ContactFlowRef', {
-            serviceToken: 'dummy'
-          }).getAtt('ContactFlowId'),
-          Content: contactFlowContent,
-        },
-      },
-      onDelete: {
-        service: 'Connect',
-        action: 'deleteContactFlow',
-        parameters: {
-          InstanceId: instanceId,
-          ContactFlowId: new cdk.CfnCustomResource(this, 'ContactFlowDeleteRef', {
-            serviceToken: 'dummy'
-          }).getAtt('ContactFlowId'),
-        },
-      },
-      policy: AwsCustomResourcePolicy.fromSdkCalls({
-        resources: AwsCustomResourcePolicy.ANY_RESOURCE,
-      }),
-    });
+    // Commented out UnifiedDialerContactFlow custom resource as contact flow will be managed manually
+    // const unifiedDialerContactFlow = new AwsCustomResource(this, 'UnifiedDialerContactFlow', {
+    //   onCreate: {
+    //     service: 'Connect',
+    //     action: 'createContactFlow',
+    //     parameters: {
+    //       InstanceId: instanceId,
+    //       Name: 'UnifiedDialerContactFlow',
+    //       Type: 'CONTACT_FLOW',
+    //       Description: 'Automated contact flow for ViSto Capital unified dialer with Supabase integration',
+    //       Content: contactFlowContent,
+    //       Tags: {
+    //         Environment: this.node.tryGetContext('environment') || 'dev',
+    //       },
+    //     },
+    //     physicalResourceId: PhysicalResourceId.fromResponse('ContactFlowId'),
+    //   },
+    //   onDelete: {
+    //     service: 'Connect',
+    //     action: 'deleteContactFlow',
+    //     parameters: {
+    //       InstanceId: instanceId,
+    //       ContactFlowId: '' // No deletion since managed manually
+    //     },
+    //   },
+    //   policy: AwsCustomResourcePolicy.fromSdkCalls({
+    //     resources: AwsCustomResourcePolicy.ANY_RESOURCE,
+    //   }),
+    // });
+
+    return undefined; // Placeholder return, actual implementation needed
   }
 
   private createLanguageQueues(instanceId: string, envConfig: any) {
@@ -166,10 +156,33 @@ export class ConnectAutomationStack extends cdk.Stack {
         parameters: {
           InstanceId: instanceId,
         },
+        physicalResourceId: PhysicalResourceId.of('GetHoursOfOperation'),
       },
       policy: AwsCustomResourcePolicy.fromSdkCalls({
         resources: AwsCustomResourcePolicy.ANY_RESOURCE,
       }),
+    });
+
+    // Update the policy for EnglishQueue and SpanishQueue custom resources
+    const queuePolicy = new iam.PolicyStatement({
+      actions: [
+        "connect:TagResource",
+        "connect:UntagResource",
+        "connect:CreateQueue",
+        "connect:DeleteQueue",
+        "connect:UpdateQueueName",
+        "connect:UpdateQueueHoursOfOperation",
+        "connect:UpdateQueueMaxContacts",
+        "connect:UpdateQueueStatus"
+      ],
+      resources: [
+        "arn:aws:connect:us-east-1:159781649891:instance/*/queue/*",
+        "arn:aws:connect:us-east-1:159781649891:instance/*/operating-hours/*",
+        "arn:aws:connect:us-east-1:159781649891:instance/*/routing-profile/*",
+        "arn:aws:connect:us-east-1:159781649891:instance/*/contact-flow/*",
+        "arn:aws:connect:us-east-1:159781649891:instance/*/lambda-function/*",
+        "arn:aws:connect:us-east-1:159781649891:instance/*/user/*",
+      ]
     });
 
     // Create Spanish Queue
@@ -191,9 +204,7 @@ export class ConnectAutomationStack extends cdk.Stack {
         },
         physicalResourceId: PhysicalResourceId.fromResponse('QueueId'),
       },
-      policy: AwsCustomResourcePolicy.fromSdkCalls({
-        resources: AwsCustomResourcePolicy.ANY_RESOURCE,
-      }),
+      policy: AwsCustomResourcePolicy.fromStatements([queuePolicy]),
     });
 
     // Create English Queue
@@ -215,9 +226,7 @@ export class ConnectAutomationStack extends cdk.Stack {
         },
         physicalResourceId: PhysicalResourceId.fromResponse('QueueId'),
       },
-      policy: AwsCustomResourcePolicy.fromSdkCalls({
-        resources: AwsCustomResourcePolicy.ANY_RESOURCE,
-      }),
+      policy: AwsCustomResourcePolicy.fromStatements([queuePolicy]),
     });
 
     // Ensure Spanish queue is created after Hours of Operation lookup
@@ -254,7 +263,7 @@ export class ConnectAutomationStack extends cdk.Stack {
           MediaConcurrencies: [
             {
               Channel: 'VOICE',
-              Concurrency: envConfig.concurrentCalls
+              Concurrency: 1
             }
           ],
           Tags: {
@@ -293,7 +302,7 @@ export class ConnectAutomationStack extends cdk.Stack {
           MediaConcurrencies: [
             {
               Channel: 'VOICE',
-              Concurrency: envConfig.concurrentCalls
+              Concurrency: 1
             }
           ],
           Tags: {
@@ -315,36 +324,36 @@ export class ConnectAutomationStack extends cdk.Stack {
     };
   }
 
-  private associateLambdaFunctions(instanceId: string, envConfig: any) {
-    // We'll try to import Lambda ARNs from the SAM stack
-    // These might not exist initially, so we'll make them optional
+  // private associateLambdaFunctions(instanceId: string, envConfig: any) {
+  //   // We'll try to import Lambda ARNs from the SAM stack
+  //   // These might not exist initially, so we'll make them optional
 
-    try {
-      const lookupLambdaArn = cdk.Fn.importValue('LookupSupabaseFunctionArn');
+  //   try {
+  //     const lookupLambdaArn = cdk.Fn.importValue('LookupSupabaseFunctionArn');
       
-      new AwsCustomResource(this, 'LookupLambdaAssociation', {
-        onCreate: {
-          service: 'Connect',
-          action: 'associateLambdaFunction',
-          parameters: {
-            InstanceId: instanceId,
-            FunctionArn: lookupLambdaArn
-          }
-        },
-        onDelete: {
-          service: 'Connect',
-          action: 'disassociateLambdaFunction',
-          parameters: {
-            InstanceId: instanceId,
-            FunctionArn: lookupLambdaArn
-          }
-        },
-        policy: AwsCustomResourcePolicy.fromSdkCalls({
-          resources: AwsCustomResourcePolicy.ANY_RESOURCE,
-        }),
-      });
-    } catch (error) {
-      console.warn('Could not import Lambda ARNs from SAM stack - they may not be exported yet');
-    }
-  }
+  //     new AwsCustomResource(this, 'LookupLambdaAssociation', {
+  //       onCreate: {
+  //         service: 'Connect',
+  //         action: 'associateLambdaFunction',
+  //         parameters: {
+  //           InstanceId: instanceId,
+  //           FunctionArn: lookupLambdaArn
+  //         }
+  //       },
+  //       onDelete: {
+  //         service: 'Connect',
+  //         action: 'disassociateLambdaFunction',
+  //         parameters: {
+  //           InstanceId: instanceId,
+  //           FunctionArn: lookupLambdaArn
+  //         }
+  //       },
+  //       policy: AwsCustomResourcePolicy.fromSdkCalls({
+  //         resources: AwsCustomResourcePolicy.ANY_RESOURCE,
+  //       }),
+  //     });
+  //   } catch (error) {
+  //     console.warn('Could not import Lambda ARNs from SAM stack - they may not be exported yet');
+  //   }
+  // }
 } 

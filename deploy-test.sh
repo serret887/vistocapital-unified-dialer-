@@ -1,5 +1,5 @@
 #!/bin/bash
-set -eo pipefail
+set -xeo pipefail
 
 # --- Configuration ---
 STACK_NAME="vistocapital-dialer-test"
@@ -8,6 +8,7 @@ ENV_FILE="$ROOT_DIR/.env"
 CDK_DIR="$ROOT_DIR/cdk"
 INFRA_TEMPLATE="$ROOT_DIR/infra/template.yaml"
 SAM_BUILD_DIR="$ROOT_DIR/.aws-sam"
+CONNECT_ALIAS="vistocapital-unified-dialer-dev"
 
 # --- Colors ---
 GREEN='\033[0;32m'
@@ -29,7 +30,6 @@ error() {
 }
 
 # --- Main Script ---
-echo "Running in $ROOT_DIR"
 
 # 1. Load Environment Variables
 if [ -f "$ENV_FILE" ]; then
@@ -48,12 +48,42 @@ if [ -z "$AWS_REGION" ] || [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]
     exit 1
 fi
 
-# 3. Deploy SAM Infrastructure
+# 3. Lookup or Create Amazon Connect Instance
+info "Looking up Amazon Connect instance with alias: $CONNECT_ALIAS"
+CONNECT_INSTANCE_ID=$(aws connect list-instances \
+  --region "$AWS_REGION" \
+  --query "InstanceSummaryList[?InstanceAlias=='$CONNECT_ALIAS'].Id" \
+  --output text)
+
+if [ -z "$CONNECT_INSTANCE_ID" ]; then
+    info "No existing Connect instance found. Creating a new one."
+    CONNECT_INSTANCE_ID=$(aws connect create-instance \
+      --region "$AWS_REGION" \
+      --identity-management-type CONNECT_MANAGED \
+      --instance-alias "$CONNECT_ALIAS" \
+      --inbound-calls-enabled \
+      --outbound-calls-enabled \
+      --query "Id" \
+      --output text)
+    info "Created new Connect instance with ID: $CONNECT_INSTANCE_ID"
+else
+    info "Found existing Connect instance with ID: $CONNECT_INSTANCE_ID"
+fi
+
+# 4. Deploy CDK Application
+info "Deploying CDK application..."
+pushd "$CDK_DIR" > /dev/null
+yarn install --silent
+cdk deploy --require-approval never --verbose --parameters ConnectInstanceId="$CONNECT_INSTANCE_ID"
+popd > /dev/null
+info "CDK deployment complete."
+
+# 5. Build and Deploy SAM Infrastructure
 info "Building SAM application..."
-sam build --template "$INFRA_TEMPLATE" --build-dir "$SAM_BUILD_DIR"
+sam build --debug --template "$INFRA_TEMPLATE" --build-dir "$SAM_BUILD_DIR"
 
 info "Deploying SAM infrastructure..."
-sam deploy \
+sam deploy --debug \
     --stack-name "$STACK_NAME" \
     --region "$AWS_REGION" \
     --capabilities CAPABILITY_IAM CAPABILITY_AUTO_EXPAND \
@@ -70,31 +100,8 @@ sam deploy \
         "CallTimeOut=3600" \
         "NoCallStatusList=''" \
         "SupabaseUrl=${SUPABASE_URL}" \
-        "SupabaseAnonKey=${SUPABASE_ANON_KEY}"
-
-info "SAM infrastructure deployment complete."
-
-# 4. Get Connect Instance ID from SAM Output
-info "Fetching ConnectInstanceId from SAM stack outputs..."
-CONNECT_INSTANCE_ID=$(aws cloudformation describe-stacks \
-    --stack-name "$STACK_NAME" \
-    --query "Stacks[0].Outputs[?OutputKey=='ConnectInstanceId'].OutputValue" \
-    --output text \
-    --region "$AWS_REGION")
-
-if [ -z "$CONNECT_INSTANCE_ID" ]; then
-    error "Failed to retrieve ConnectInstanceId from stack outputs. Aborting."
-    exit 1
-fi
-info "Successfully retrieved Connect Instance ID: $CONNECT_INSTANCE_ID"
-
-# 5. Deploy CDK Application
-info "Deploying CDK application..."
-pushd "$CDK_DIR" > /dev/null
-yarn install --silent
-cdk deploy \
-    --require-approval never \
-    --parameters connectInstanceId="$CONNECT_INSTANCE_ID"
-popd > /dev/null
+        "SupabaseAnonKey=${SUPABASE_ANON_KEY}" \
+        "CustomerProfilesDomainName=${CUSTOMER_PROFILES_DOMAIN_NAME}" \
+        "ConnectInstanceId=${CONNECT_INSTANCE_ID}"
 
 info "Deployment complete!" 
