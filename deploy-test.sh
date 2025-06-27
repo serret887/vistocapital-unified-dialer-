@@ -2,7 +2,7 @@
 set -xeo pipefail
 
 # --- Configuration ---
-STACK_NAME="vistocapital-dialer-test"
+STACK_NAME="vistocapital-dialer-dev"
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 ENV_FILE="$ROOT_DIR/.env"
 CDK_DIR="$ROOT_DIR/cdk"

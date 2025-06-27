@@ -194,7 +194,6 @@ export class ConnectAutomationStack extends cdk.Stack {
           InstanceId: instanceId,
           Name: 'Spanish-Customer-Queue',
           Description: 'Queue for Spanish-speaking customers - ViSto Capital',
-          HoursOfOperationId: hoursOfOperation.getResponseField('HoursOfOperationSummaryList.0.Id'),
           MaxContacts: envConfig.maxContactsInQueue,
           Tags: {
             Language: 'Spanish',
@@ -216,7 +215,6 @@ export class ConnectAutomationStack extends cdk.Stack {
           InstanceId: instanceId,
           Name: 'English-Customer-Queue',
           Description: 'Queue for English-speaking customers - ViSto Capital',
-          HoursOfOperationId: hoursOfOperation.getResponseField('HoursOfOperationSummaryList.0.Id'),
           MaxContacts: envConfig.maxContactsInQueue,
           Tags: {
             Language: 'English',
@@ -240,6 +238,24 @@ export class ConnectAutomationStack extends cdk.Stack {
   }
 
   private createRoutingProfiles(instanceId: string, queues: any, envConfig: any) {
+    // Define a policy for routing profiles
+    const routingProfilePolicy = new iam.PolicyStatement({
+      actions: [
+        "connect:TagResource",
+        "connect:UntagResource",
+        "connect:CreateRoutingProfile",
+        "connect:DeleteRoutingProfile",
+        "connect:UpdateRoutingProfileName",
+        "connect:UpdateRoutingProfileQueues",
+        "connect:UpdateRoutingProfileConcurrency",
+        "connect:UpdateRoutingProfileDefaultOutboundQueue"
+      ],
+      resources: [
+        "arn:aws:connect:us-east-1:159781649891:instance/*/routing-profile/*",
+        "arn:aws:connect:us-east-1:159781649891:instance/*/queue/*"
+      ]
+    });
+
     // Create Spanish Routing Profile
     const spanishProfile = new AwsCustomResource(this, 'SpanishRoutingProfile', {
       onCreate: {
@@ -274,9 +290,7 @@ export class ConnectAutomationStack extends cdk.Stack {
         },
         physicalResourceId: PhysicalResourceId.fromResponse('RoutingProfileId'),
       },
-      policy: AwsCustomResourcePolicy.fromSdkCalls({
-        resources: AwsCustomResourcePolicy.ANY_RESOURCE,
-      }),
+      policy: AwsCustomResourcePolicy.fromStatements([routingProfilePolicy]),
     });
 
     // Create English Routing Profile
@@ -313,9 +327,7 @@ export class ConnectAutomationStack extends cdk.Stack {
         },
         physicalResourceId: PhysicalResourceId.fromResponse('RoutingProfileId'),
       },
-      policy: AwsCustomResourcePolicy.fromSdkCalls({
-        resources: AwsCustomResourcePolicy.ANY_RESOURCE,
-      }),
+      policy: AwsCustomResourcePolicy.fromStatements([routingProfilePolicy]),
     });
 
     return {

@@ -2,7 +2,7 @@
 set -eo pipefail
 
 # --- Configuration ---
-STACK_NAME="vistocapital-dialer-test"
+STACK_NAME="vistocapital-dialer-dev"
 ROOT_ENV_FILE="$(dirname "$0")/.env"
 CDK_DIR="$(dirname "$0")/cdk"
 
